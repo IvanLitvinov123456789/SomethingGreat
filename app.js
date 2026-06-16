@@ -5,6 +5,8 @@ const COMMISSION_RATE = 0.15;
 const DELIVERY_COST = 90;
 const RETURN_LOGISTICS_COST = 70;
 const DAILY_AD_COST = 500;
+const FEATURED_PRODUCT_COST = 650;
+const ZERO_DEMAND_PRICE_RATIO = 2.25;
 
 const PRODUCTS = [
   { id: "case", emoji: "📱", name: "Чехол для телефона", category: "Аксессуары", cost: 170, marketPrice: 590, demand: 9, competition: 8, returnRate: 0.04 },
@@ -18,6 +20,54 @@ const PRODUCTS = [
 ];
 
 const MAX_UPGRADE_LEVEL = 5;
+
+const DAILY_ACTIONS = [
+  {
+    id: "pricing",
+    emoji: "🧠",
+    title: "Аналитика цен",
+    text: "Спрос меньше проседает от умеренно высокой цены.",
+    cost: 250,
+    priceSensitivityMultiplier: 0.78,
+    demandMultiplier: 1,
+    returnMultiplier: 1,
+    ratingBonus: 0
+  },
+  {
+    id: "content",
+    emoji: "🖼️",
+    title: "Карточки товара",
+    text: "Больше переходов, но нужен бюджет на фото и описание.",
+    cost: 520,
+    priceSensitivityMultiplier: 1,
+    demandMultiplier: 1.18,
+    returnMultiplier: 1,
+    ratingBonus: 0
+  },
+  {
+    id: "support",
+    emoji: "🛡️",
+    title: "Сервис и возвраты",
+    text: "Меньше возвратов и чуть лучше рейтинг.",
+    cost: 420,
+    priceSensitivityMultiplier: 1,
+    demandMultiplier: 0.98,
+    returnMultiplier: 0.66,
+    ratingBonus: 0.012
+  },
+  {
+    id: "supplier",
+    emoji: "🤝",
+    title: "Поставщики",
+    text: "Закупка дешевле до конца дня. Выгодно перед крупной партией.",
+    cost: 350,
+    priceSensitivityMultiplier: 1,
+    demandMultiplier: 1,
+    returnMultiplier: 1,
+    ratingBonus: 0,
+    purchaseDiscount: 0.08
+  }
+];
 
 const MARKET_EVENTS = [
   {
@@ -177,6 +227,8 @@ const defaultState = () => ({
   inventory: {},
   upgrades: {},
   claimedGoals: [],
+  dailyAction: "pricing",
+  featuredProductId: null,
   marketEventId: "steady",
   lastReport: null,
   events: ["Магазин открыт. Закупите первый товар на вкладке «Рынок»."],
@@ -214,6 +266,8 @@ function loadState() {
       inventory: parsed.inventory || {},
       upgrades: parsed.upgrades || {},
       claimedGoals: parsed.claimedGoals || [],
+      dailyAction: parsed.dailyAction || "pricing",
+      featuredProductId: parsed.featuredProductId || null,
       marketEventId: parsed.marketEventId || "steady"
     };
   } catch (error) {
@@ -249,8 +303,39 @@ function notify(message) {
   toastTimer = setTimeout(() => toast.classList.remove("show"), 2200);
 }
 
+function installWheelScrollFallback() {
+  document.addEventListener("wheel", event => {
+    if (event.ctrlKey || event.defaultPrevented || Math.abs(event.deltaY) < 1) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest("input, textarea, select")) return;
+    if (!modalBackdrop.classList.contains("hidden") && target?.closest(".modal")) return;
+
+    const page = document.scrollingElement || document.documentElement;
+    const maxScroll = page.scrollHeight - window.innerHeight;
+    if (maxScroll <= 0) return;
+
+    event.preventDefault();
+    window.scrollBy({ top: event.deltaY, left: 0, behavior: "auto" });
+  }, { passive: false });
+}
+
 function productById(id) {
   return PRODUCTS.find(product => product.id === id);
+}
+
+function currentDailyAction() {
+  return DAILY_ACTIONS.find(action => action.id === state.dailyAction) || DAILY_ACTIONS[0];
+}
+
+function featuredProduct() {
+  if (!state.featuredProductId || !state.inventory[state.featuredProductId]?.qty) return null;
+  return productById(state.featuredProductId);
+}
+
+function purchaseCost(product) {
+  const action = currentDailyAction();
+  const discount = action.purchaseDiscount || 0;
+  return Math.round(product.cost * (1 - discount));
 }
 
 function inventoryValue() {
@@ -261,7 +346,7 @@ function inventoryValue() {
 }
 
 function grossMargin(product, price) {
-  return price - product.cost - price * COMMISSION_RATE - effectiveDeliveryCost();
+  return price - purchaseCost(product) - price * COMMISSION_RATE - effectiveDeliveryCost();
 }
 
 function ownedProducts() {
@@ -318,12 +403,36 @@ function productDemandMultiplier(product) {
   const categoryBoost = event.categoryBoosts?.[product.category] || 1;
   const brandBoost = 1 + upgradeLevel("brand") * 0.025;
   const analyticsBoost = 1 + upgradeLevel("analytics") * 0.035;
-  return (event.demandMultiplier || 1) * categoryBoost * brandBoost * analyticsBoost;
+  const actionBoost = currentDailyAction().demandMultiplier || 1;
+  const featuredBoost = state.featuredProductId === product.id ? 1.34 : 1;
+  return (event.demandMultiplier || 1) * categoryBoost * brandBoost * analyticsBoost * actionBoost * featuredBoost;
 }
 
 function competitionFactor(product) {
   const analyticsRelief = upgradeLevel("analytics") * 0.35;
   return clamp(1.22 - (product.competition - analyticsRelief) * 0.055, 0.55, 1.12);
+}
+
+function priceDemandFactor(product, price, sensitivity = 1) {
+  if (!Number.isFinite(price) || price <= 0) return 0;
+  if (price >= product.marketPrice * ZERO_DEMAND_PRICE_RATIO) return 0;
+  return clamp(Math.pow(product.marketPrice / price, sensitivity), 0, 1.8);
+}
+
+function priceDemandChance(product, price) {
+  const event = currentMarketEvent();
+  const action = currentDailyAction();
+  const sensitivity = (event.priceSensitivity || 1) * (action.priceSensitivityMultiplier || 1);
+  const factor = priceDemandFactor(product, price, sensitivity);
+  return Math.round(clamp(factor / 1.45 * 100, 0, 100));
+}
+
+function productRiskLabel(product, price) {
+  const chance = priceDemandChance(product, price);
+  if (chance === 0) return { label: "Спрос 0%", className: "bad" };
+  if (price > product.marketPrice * 1.45) return { label: `Риск: ${chance}%`, className: "bad" };
+  if (price > product.marketPrice * 1.12) return { label: `Спрос: ${chance}%`, className: "" };
+  return { label: `Спрос: ${chance}%`, className: "good" };
 }
 
 function goalValue(goal) {
@@ -362,6 +471,8 @@ function renderHome() {
   const stockUnits = Object.values(state.inventory).reduce((sum, item) => sum + item.qty, 0);
   const activeAds = Object.values(state.inventory).filter(item => item.adActive).length;
   const marketEvent = currentMarketEvent();
+  const action = currentDailyAction();
+  const featured = featuredProduct();
 
   view.innerHTML = `
     <section class="hero">
@@ -371,6 +482,7 @@ function renderHome() {
         <span class="hero-pill">⭐ ${state.rating.toFixed(2)}</span>
         <span class="hero-pill">📦 ${stockUnits} шт.</span>
         <span class="hero-pill">📣 ${activeAds} реклам.</span>
+        <span class="hero-pill">${action.emoji} Фокус дня</span>
       </div>
       <button id="next-day" class="primary-btn" type="button" ${stockUnits === 0 ? "disabled" : ""}>Завершить день</button>
     </section>
@@ -383,6 +495,34 @@ function renderHome() {
           <h2>${escapeHtml(marketEvent.title)}</h2>
           <p>${escapeHtml(marketEvent.text)}</p>
         </div>
+      </article>
+    </section>
+
+    <section class="section">
+      <div class="section-heading">
+        <h2>Фокус дня</h2>
+        <span class="section-note">Влияет на следующий расчёт продаж</span>
+      </div>
+      <div class="focus-grid">
+        ${DAILY_ACTIONS.map(item => `
+          <button class="focus-card ${state.dailyAction === item.id ? "active" : ""}" data-action="${item.id}" type="button">
+            <span class="focus-icon">${item.emoji}</span>
+            <span class="focus-title">${escapeHtml(item.title)}</span>
+            <span class="focus-text">${escapeHtml(item.text)}</span>
+            <span class="focus-cost">${money(item.cost)} / день</span>
+          </button>
+        `).join("")}
+      </div>
+    </section>
+
+    <section class="section">
+      <article class="card decision-card">
+        <div>
+          <div class="section-note">Товар дня</div>
+          <h2>${featured ? `${featured.emoji} ${escapeHtml(featured.name)}` : "Не выбран"}</h2>
+          <p>${featured ? `+34% к спросу за ${money(FEATURED_PRODUCT_COST)} в день. Витрина сильнее всего работает, когда совпадают рынок, остатки и маржа.` : "Витрина свободна. Один товар можно усилить на вкладке «Товары»."}</p>
+        </div>
+        <button class="secondary-btn" id="open-stock-from-decision" type="button">Выбрать</button>
       </article>
     </section>
 
@@ -401,11 +541,14 @@ function renderHome() {
       <section class="section">
         <div class="section-heading"><h2>Отчёт за день ${report.day}</h2><span class="section-note">${escapeHtml(report.event || "Рынок")} · продано ${report.sold} шт.</span></div>
         <article class="card report-list">
+          <div class="report-row"><span>Фокус</span><strong>${escapeHtml(report.focus || "Обычный день")}</strong></div>
+          ${report.featured ? `<div class="report-row"><span>Товар дня</span><strong>${escapeHtml(report.featured)}</strong></div>` : ""}
           <div class="report-row"><span>Выручка</span><strong>${money(report.revenue)}</strong></div>
           <div class="report-row"><span>Возвраты</span><strong>−${money(report.refunds)}</strong></div>
           <div class="report-row"><span>Комиссия</span><strong>−${money(report.commission)}</strong></div>
           <div class="report-row"><span>Логистика</span><strong>−${money(report.logistics)}</strong></div>
           <div class="report-row"><span>Реклама</span><strong>−${money(report.ads)}</strong></div>
+          ${report.operations ? `<div class="report-row"><span>Фокус и витрина</span><strong>−${money(report.operations)}</strong></div>` : ""}
           <div class="report-row total"><span>Прибыль дня</span><strong class="${report.profit >= 0 ? "positive" : "negative"}">${money(report.profit)}</strong></div>
         </article>
       </section>
@@ -420,6 +563,8 @@ function renderHome() {
   `;
 
   document.getElementById("next-day")?.addEventListener("click", simulateDay);
+  document.querySelectorAll(".focus-card").forEach(button => button.addEventListener("click", () => setDailyAction(button.dataset.action)));
+  document.getElementById("open-stock-from-decision")?.addEventListener("click", () => switchTab("stock"));
   document.querySelectorAll(".claim-goal").forEach(button => button.addEventListener("click", () => claimGoal(button.dataset.id)));
 }
 
@@ -474,6 +619,8 @@ function renderMarket() {
       ${PRODUCTS.map(product => {
         const current = state.inventory[product.id];
         const margin = grossMargin(product, product.marketPrice);
+        const currentCost = purchaseCost(product);
+        const supplierDiscount = currentCost < product.cost;
         return `
           <article class="card">
             <div class="card-top">
@@ -481,9 +628,10 @@ function renderMarket() {
                 <div class="product-emoji">${product.emoji}</div>
                 <div style="min-width:0"><h3 class="product-title">${escapeHtml(product.name)}</h3><div class="product-category">${escapeHtml(product.category)}</div></div>
               </div>
-              <div class="price">${money(product.cost)}</div>
+              <div class="price">${money(currentCost)}</div>
             </div>
             <div class="tags">
+              ${supplierDiscount ? `<span class="tag good">Скидка поставщика ${Math.round((1 - currentCost / product.cost) * 100)}%</span>` : ""}
               <span class="tag">Рынок: ${money(product.marketPrice)}</span>
               <span class="tag ${margin > 250 ? "good" : ""}">Маржа ≈ ${money(margin)}</span>
               <span class="tag">Спрос ${product.demand}/10</span>
@@ -527,12 +675,15 @@ function renderStock() {
       const item = state.inventory[product.id];
       const margin = grossMargin(product, item.price);
       const stockPercent = clamp(item.qty / 50 * 100, 0, 100);
+      const risk = productRiskLabel(product, item.price);
+      const zeroPrice = Math.round(product.marketPrice * ZERO_DEMAND_PRICE_RATIO / 10) * 10;
+      const isFeatured = state.featuredProductId === product.id;
       return `
-        <article class="card">
+        <article class="card ${isFeatured ? "featured-card" : ""}">
           <div class="card-top">
             <div class="product-main">
               <div class="product-emoji">${product.emoji}</div>
-              <div style="min-width:0"><h3 class="product-title">${escapeHtml(product.name)}</h3><div class="product-category">Продано за всё время: ${item.lifetimeSold || 0}</div></div>
+              <div style="min-width:0"><h3 class="product-title">${escapeHtml(product.name)}</h3><div class="product-category">${isFeatured ? "Товар дня" : `Продано за всё время: ${item.lifetimeSold || 0}`}</div></div>
             </div>
             <div class="price">${item.qty} шт.</div>
           </div>
@@ -547,6 +698,8 @@ function renderStock() {
             </div>
             <div class="tags">
               <span class="tag">Средняя цена: ${money(product.marketPrice)}</span>
+              <span class="tag bad">0% спроса от ${money(zeroPrice)}</span>
+              <span class="tag ${risk.className}">${risk.label}</span>
               <span class="tag ${margin >= 0 ? "good" : "bad"}">Маржа: ${money(margin)}</span>
             </div>
             <div class="toggle-row">
@@ -556,6 +709,9 @@ function renderStock() {
                 <span class="slider"></span>
               </label>
             </div>
+            <button class="secondary-btn feature-btn" data-id="${product.id}" type="button">
+              ${isFeatured ? "Убрать с витрины дня" : `Сделать товаром дня (${money(FEATURED_PRODUCT_COST)}/день)`}
+            </button>
             <button class="secondary-btn restock-btn" data-id="${product.id}" type="button">Докупить товар</button>
           </div>
         </article>
@@ -565,6 +721,7 @@ function renderStock() {
 
   document.querySelectorAll(".save-price").forEach(button => button.addEventListener("click", () => updatePrice(button.dataset.id)));
   document.querySelectorAll(".ad-toggle").forEach(toggle => toggle.addEventListener("change", () => toggleAd(toggle.dataset.id, toggle.checked)));
+  document.querySelectorAll(".feature-btn").forEach(button => button.addEventListener("click", () => toggleFeaturedProduct(button.dataset.id)));
   document.querySelectorAll(".restock-btn").forEach(button => button.addEventListener("click", () => openPurchase(button.dataset.id)));
 }
 
@@ -660,10 +817,31 @@ function switchTab(tab) {
   render();
 }
 
+function setDailyAction(actionId) {
+  if (!DAILY_ACTIONS.some(action => action.id === actionId)) return;
+  state.dailyAction = actionId;
+  saveState();
+  vibrate("light");
+  notify(`Фокус дня: ${currentDailyAction().title}`);
+  renderHome();
+}
+
+function toggleFeaturedProduct(productId) {
+  const product = productById(productId);
+  if (!product || !state.inventory[productId]) return;
+
+  state.featuredProductId = state.featuredProductId === productId ? null : productId;
+  saveState();
+  vibrate("light");
+  notify(state.featuredProductId ? `Товар дня: ${product.name}` : "Товар дня снят с витрины");
+  renderStock();
+}
+
 function openPurchase(productId) {
   purchaseProductId = productId;
   const product = productById(productId);
   if (!product) return;
+  const unitCost = purchaseCost(product);
 
   modalContent.innerHTML = `
     <div class="modal-product">
@@ -677,8 +855,8 @@ function openPurchase(productId) {
       <button id="qty-plus" type="button">+</button>
     </div>
     <div class="cost-box">
-      <div class="report-row"><span>Цена за штуку</span><strong>${money(product.cost)}</strong></div>
-      <div class="report-row total"><span>Сумма закупки</span><strong id="purchase-total">${money(product.cost * 10)}</strong></div>
+      <div class="report-row"><span>Цена за штуку</span><strong>${money(unitCost)}</strong></div>
+      <div class="report-row total"><span>Сумма закупки</span><strong id="purchase-total">${money(unitCost * 10)}</strong></div>
     </div>
     <button id="confirm-purchase" class="primary-btn" type="button">Купить партию</button>
   `;
@@ -693,7 +871,7 @@ function openPurchase(productId) {
   const refreshTotal = () => {
     const qty = clamp(Number.parseInt(qtyInput.value, 10) || 1, 1, 999);
     qtyInput.value = qty;
-    const cost = qty * product.cost;
+    const cost = qty * unitCost;
     total.textContent = money(cost);
     confirm.disabled = cost > state.balance;
     confirm.textContent = cost > state.balance ? "Недостаточно денег" : "Купить партию";
@@ -715,7 +893,7 @@ function closeModal() {
 function buyProduct(productId, quantity) {
   const product = productById(productId);
   const qty = clamp(Number.parseInt(quantity, 10) || 1, 1, 999);
-  const cost = product.cost * qty;
+  const cost = purchaseCost(product) * qty;
   if (cost > state.balance) {
     notify("Недостаточно денег для этой закупки");
     return;
@@ -744,7 +922,7 @@ function updatePrice(productId) {
   state.inventory[productId].price = price;
   saveState();
   vibrate("light");
-  notify("Цена сохранена");
+  notify(priceDemandChance(productById(productId), price) === 0 ? "Цена сохранена: спрос 0%" : "Цена сохранена");
   renderStock();
 }
 
@@ -813,8 +991,13 @@ function simulateDay() {
   const deliveryCost = effectiveDeliveryCost();
   const returnLogisticsCost = effectiveReturnLogisticsCost();
   const adCost = effectiveAdCost();
+  const action = currentDailyAction();
+  const activeFeatured = state.featuredProductId && state.inventory[state.featuredProductId]?.qty > 0
+    ? productById(state.featuredProductId)
+    : null;
   const marketingBoost = 1 + upgradeLevel("marketing") * 0.1;
-  const priceSensitivity = marketEvent.priceSensitivity || 1;
+  const priceSensitivity = (marketEvent.priceSensitivity || 1) * (action.priceSensitivityMultiplier || 1);
+  const operations = action.cost + (activeFeatured ? FEATURED_PRODUCT_COST : 0);
   let revenue = 0;
   let refunds = 0;
   let commission = 0;
@@ -828,7 +1011,7 @@ function simulateDay() {
     const item = state.inventory[product.id];
     if (!item || item.qty <= 0) continue;
 
-    const priceFactor = clamp(Math.pow(product.marketPrice / item.price, priceSensitivity), 0.28, 1.8);
+    const priceFactor = priceDemandFactor(product, item.price, priceSensitivity);
     const ratingFactor = clamp(state.rating / 4.5, 0.65, 1.15);
     const adFactor = item.adActive ? 1.7 * marketingBoost : 1;
     const noise = randomBetween(0.72, 1.28);
@@ -844,7 +1027,7 @@ function simulateDay() {
     );
     sold = clamp(sold, 0, item.qty);
 
-    const returns = estimateReturns(sold, effectiveReturnRate(product));
+    const returns = estimateReturns(sold, effectiveReturnRate(product) * (action.returnMultiplier || 1));
     const netSold = sold - returns;
     const itemRevenue = sold * item.price;
     const itemRefunds = returns * item.price;
@@ -868,7 +1051,7 @@ function simulateDay() {
     if (item.qty === 0) productEvents.push(`⚠️ «${product.name}» закончился на складе.`);
   }
 
-  const profit = revenue - refunds - commission - logistics - ads;
+  const profit = revenue - refunds - commission - logistics - ads - operations;
   state.balance += profit;
   state.totalRevenue += revenue - refunds;
   state.totalProfit += profit;
@@ -877,7 +1060,7 @@ function simulateDay() {
   if (soldTotal > 0) {
     const returnShare = returnsTotal / Math.max(soldTotal + returnsTotal, 1);
     const serviceBonus = upgradeLevel("brand") * 0.003 + upgradeLevel("logistics") * 0.003;
-    const ratingDelta = (returnShare > 0.12 ? -0.05 : returnShare > 0.07 ? -0.02 : 0.01) + serviceBonus;
+    const ratingDelta = (returnShare > 0.12 ? -0.05 : returnShare > 0.07 ? -0.02 : 0.01) + serviceBonus + (action.ratingBonus || 0);
     state.rating = clamp(state.rating + ratingDelta, 1, 5);
   } else {
     state.rating = clamp(state.rating - 0.01, 1, 5);
@@ -892,8 +1075,11 @@ function simulateDay() {
     commission,
     logistics,
     ads,
+    operations,
     profit,
-    event: marketEvent.title
+    event: marketEvent.title,
+    focus: action.title,
+    featured: activeFeatured?.name || null
   };
 
   state.day += 1;
@@ -903,7 +1089,8 @@ function simulateDay() {
     ? `День завершён: прибыль ${money(profit)}, продано ${soldTotal} шт.`
     : `День завершён с убытком ${money(Math.abs(profit))}. Проверьте цену и рекламу.`;
   const tomorrowEvent = `Завтра: ${nextEvent.title}. ${nextEvent.text}`;
-  state.events = [summary, tomorrowEvent, ...productEvents, ...state.events].slice(0, 20);
+  const decisionEvent = `Фокус: ${action.title}${activeFeatured ? `, товар дня: ${activeFeatured.name}` : ""}.`;
+  state.events = [summary, tomorrowEvent, decisionEvent, ...productEvents, ...state.events].slice(0, 20);
 
   saveState();
   vibrate(profit >= 0 ? "medium" : "heavy");
@@ -944,4 +1131,5 @@ document.addEventListener("keydown", event => {
   if (event.key === "Escape") closeModal();
 });
 
+installWheelScrollFallback();
 render();
