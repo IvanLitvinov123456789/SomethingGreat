@@ -1,4 +1,6 @@
-# Market Boss — MVP Telegram Mini App
+# SomethingGreat
+
+Market Boss — MVP Telegram Mini App.
 
 Рабочий MVP симулятора продавца на маркетплейсе.
 
