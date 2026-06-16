@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#6c5ce7" />
+  <title>Market Boss — симулятор продавца</title>
+  <script src="https://telegram.org/js/telegram-web-app.js?62"></script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">MARKET BOSS</div>
+        <h1 id="page-title">Главная</h1>
+      </div>
+      <div class="day-badge">День <span id="header-day">1</span></div>
+    </header>
+
+    <main id="view" class="view" aria-live="polite"></main>
+
+    <nav class="bottom-nav" aria-label="Навигация">
+      <button class="nav-item active" data-tab="home" type="button">
+        <span class="nav-icon">🏠</span><span>Главная</span>
+      </button>
+      <button class="nav-item" data-tab="market" type="button">
+        <span class="nav-icon">🛒</span><span>Рынок</span>
+      </button>
+      <button class="nav-item" data-tab="stock" type="button">
+        <span class="nav-icon">📦</span><span>Товары</span>
+      </button>
+      <button class="nav-item" data-tab="profile" type="button">
+        <span class="nav-icon">📊</span><span>Статистика</span>
+      </button>
+    </nav>
+  </div>
+
+  <div id="modal-backdrop" class="modal-backdrop hidden" aria-hidden="true">
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <button id="modal-close" class="modal-close" type="button" aria-label="Закрыть">×</button>
+      <div id="modal-content"></div>
+    </section>
+  </div>
+
+  <div id="toast" class="toast" role="status"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
