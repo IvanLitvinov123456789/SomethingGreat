@@ -156,7 +156,7 @@ h3 { margin-bottom: 6px; font-size: 16px; }
 }
 
 .section { margin-top: 20px; }
-.section-heading { display: flex; align-items: end; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; margin-bottom: 10px; }
+.section-heading { display: flex; align-items: flex-start; flex-direction: column; justify-content: space-between; gap: 6px 12px; margin-bottom: 10px; }
 .section-heading h2 { margin: 0; }
 .section-note { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .section-heading > * { min-width: 0; }
@@ -204,6 +204,24 @@ h3 { margin-bottom: 6px; font-size: 16px; }
 
 .product-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
 .product-actions .primary-btn, .product-actions .secondary-btn { padding: 11px; }
+
+.sparkline {
+  display: flex;
+  align-items: end;
+  gap: 4px;
+  height: 46px;
+  margin-top: 12px;
+  padding: 8px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--muted) 7%, transparent);
+}
+
+.sparkline span {
+  flex: 1;
+  min-width: 6px;
+  border-radius: 999px 999px 3px 3px;
+  background: color-mix(in srgb, var(--accent) 72%, white);
+}
 
 .empty-state {
   padding: 30px 18px;
@@ -278,14 +296,14 @@ h3 { margin-bottom: 6px; font-size: 16px; }
   font-weight: 900;
 }
 
-.decision-card {
+.decision-card, .tutorial-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }
 
-.decision-card h2 { margin-bottom: 5px; }
-.decision-card p { margin-bottom: 0; color: var(--muted); font-size: 13px; line-height: 1.38; }
+.decision-card h2, .tutorial-card h2 { margin-bottom: 5px; }
+.decision-card p, .tutorial-card p { margin-bottom: 0; color: var(--muted); font-size: 13px; line-height: 1.38; }
 
 .market-event-card {
   display: grid;
@@ -371,6 +389,75 @@ h3 { margin-bottom: 6px; font-size: 16px; }
   border-radius: 12px;
   background: color-mix(in srgb, var(--success) 9%, transparent);
   color: var(--success);
+}
+
+.mini-panel {
+  display: grid;
+  gap: 5px;
+  padding: 11px;
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--muted) 7%, transparent);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.mini-panel strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.ad-grid, .supplier-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.supplier-grid {
+  grid-template-columns: 1fr;
+  margin-bottom: 14px;
+}
+
+.ad-option, .supplier-option, .event-choice {
+  display: grid;
+  gap: 4px;
+  min-height: 64px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--card);
+  color: var(--text);
+  text-align: left;
+}
+
+.ad-option.active, .supplier-option.active {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
+  background: color-mix(in srgb, var(--accent) 9%, var(--card));
+}
+
+.ad-option span, .supplier-option span {
+  font-size: 18px;
+}
+
+.ad-option strong, .supplier-option strong, .event-choice strong {
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.ad-option small, .supplier-option small, .event-choice span {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.event-choice-list {
+  display: grid;
+  gap: 9px;
+}
+
+.event-choice:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .stock-controls { margin-top: 14px; display: grid; gap: 10px; }
@@ -483,15 +570,26 @@ h3 { margin-bottom: 6px; font-size: 16px; }
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
+@media (max-width: 420px) {
+  .hero-pill {
+    max-width: 132px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
 @media (min-width: 520px) {
   .focus-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .supplier-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 @media (min-width: 760px) {
   .view { padding: 22px; }
+  .section-heading { align-items: end; flex-direction: row; }
   .metrics-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .focus-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .decision-card { grid-template-columns: minmax(0, 1fr) 148px; align-items: center; }
+  .decision-card, .tutorial-card { grid-template-columns: minmax(0, 1fr) 148px; align-items: center; }
   .catalog-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
   .catalog-grid .card { margin-bottom: 0; }
   .goal-card { grid-template-columns: 1fr auto; }

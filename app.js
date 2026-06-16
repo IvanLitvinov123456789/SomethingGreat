@@ -1,22 +1,64 @@
 "use strict";
 
+const GAME_TITLE = "Marketplace Empire";
 const STORAGE_KEY = "market_boss_mvp_v1";
-const COMMISSION_RATE = 0.15;
-const DELIVERY_COST = 90;
-const RETURN_LOGISTICS_COST = 70;
-const DAILY_AD_COST = 500;
-const FEATURED_PRODUCT_COST = 650;
-const ZERO_DEMAND_PRICE_RATIO = 2.25;
+const SAVE_VERSION = 2;
+const ECONOMY = {
+  startingBalance: 50000,
+  commissionRate: 0.15,
+  deliveryCost: 90,
+  returnLogisticsCost: 70,
+  baseAdCost: 500,
+  featuredProductCost: 650,
+  zeroDemandPriceRatio: 1.8,
+  baseActionLimit: 3,
+  baseWarehouseCapacity: 120,
+  storageCostPerUnit: 3,
+  salePriceStep: 10,
+  ratingMin: 1,
+  ratingMax: 5,
+  rngModulus: 2147483647,
+  rngMultiplier: 48271
+};
+
+const COMMISSION_RATE = ECONOMY.commissionRate;
+const DELIVERY_COST = ECONOMY.deliveryCost;
+const RETURN_LOGISTICS_COST = ECONOMY.returnLogisticsCost;
+const DAILY_AD_COST = ECONOMY.baseAdCost;
+const FEATURED_PRODUCT_COST = ECONOMY.featuredProductCost;
+const ZERO_DEMAND_PRICE_RATIO = ECONOMY.zeroDemandPriceRatio;
 
 const PRODUCTS = [
-  { id: "case", emoji: "📱", name: "Чехол для телефона", category: "Аксессуары", cost: 170, marketPrice: 590, demand: 9, competition: 8, returnRate: 0.04 },
-  { id: "lamp", emoji: "💡", name: "Настольная лампа", category: "Дом", cost: 780, marketPrice: 1690, demand: 6, competition: 5, returnRate: 0.07 },
-  { id: "bottle", emoji: "🥤", name: "Спортивная бутылка", category: "Спорт", cost: 310, marketPrice: 890, demand: 7, competition: 6, returnRate: 0.05 },
-  { id: "headphones", emoji: "🎧", name: "Bluetooth-наушники", category: "Электроника", cost: 950, marketPrice: 2290, demand: 8, competition: 9, returnRate: 0.11 },
-  { id: "organizer", emoji: "🧺", name: "Органайзер для дома", category: "Дом", cost: 420, marketPrice: 1190, demand: 6, competition: 4, returnRate: 0.03 },
-  { id: "toy", emoji: "🧸", name: "Мягкая игрушка", category: "Детям", cost: 520, marketPrice: 1390, demand: 7, competition: 6, returnRate: 0.06 },
-  { id: "mouse", emoji: "🖱️", name: "Беспроводная мышь", category: "Электроника", cost: 620, marketPrice: 1590, demand: 7, competition: 8, returnRate: 0.08 },
-  { id: "notebook", emoji: "📓", name: "Планер на год", category: "Канцелярия", cost: 240, marketPrice: 790, demand: 5, competition: 5, returnRate: 0.02 }
+  { id: "case", emoji: "📱", name: "Чехол для телефона", category: "Аксессуары", cost: 170, marketPrice: 590, demand: 9, competition: 8, returnRate: 0.04, priceSensitivity: 1.28, volume: 1, trendChance: 0.08, shelfLife: 36 },
+  { id: "lamp", emoji: "💡", name: "Настольная лампа", category: "Дом", cost: 780, marketPrice: 1690, demand: 6, competition: 5, returnRate: 0.07, priceSensitivity: 1.02, volume: 3, trendChance: 0.04, shelfLife: 42 },
+  { id: "bottle", emoji: "🥤", name: "Спортивная бутылка", category: "Спорт", cost: 310, marketPrice: 890, demand: 7, competition: 6, returnRate: 0.05, priceSensitivity: 1.14, volume: 2, trendChance: 0.06, shelfLife: 34 },
+  { id: "headphones", emoji: "🎧", name: "Bluetooth-наушники", category: "Электроника", cost: 950, marketPrice: 2290, demand: 8, competition: 9, returnRate: 0.11, priceSensitivity: 1.08, volume: 1, trendChance: 0.07, shelfLife: 26 },
+  { id: "organizer", emoji: "🧺", name: "Органайзер для дома", category: "Дом", cost: 420, marketPrice: 1190, demand: 6, competition: 4, returnRate: 0.03, priceSensitivity: 0.92, volume: 3, trendChance: 0.03, shelfLife: 52 },
+  { id: "toy", emoji: "🧸", name: "Мягкая игрушка", category: "Детям", cost: 520, marketPrice: 1390, demand: 7, competition: 6, returnRate: 0.06, priceSensitivity: 1.03, volume: 3, trendChance: 0.05, shelfLife: 40 },
+  { id: "mouse", emoji: "🖱️", name: "Беспроводная мышь", category: "Электроника", cost: 620, marketPrice: 1590, demand: 7, competition: 8, returnRate: 0.08, priceSensitivity: 1.18, volume: 1, trendChance: 0.06, shelfLife: 32 },
+  { id: "notebook", emoji: "📓", name: "Планер на год", category: "Канцелярия", cost: 240, marketPrice: 790, demand: 5, competition: 5, returnRate: 0.02, priceSensitivity: 1.22, volume: 1, trendChance: 0.03, shelfLife: 30 },
+  { id: "hoodie", emoji: "🧥", name: "Худи oversize", category: "Одежда", cost: 880, marketPrice: 2190, demand: 8, competition: 7, returnRate: 0.16, priceSensitivity: 1.16, volume: 2, trendChance: 0.08, shelfLife: 24 },
+  { id: "mini_fan", emoji: "🌬️", name: "Мини-вентилятор", category: "Тренд", cost: 360, marketPrice: 1290, demand: 6, competition: 5, returnRate: 0.06, priceSensitivity: 0.86, volume: 2, trendChance: 0.18, shelfLife: 16 }
+];
+
+const SUPPLIERS = [
+  { id: "cheap", title: "Дешёвый риск", emoji: "🏷️", priceFactor: 0.86, quality: 0.82, minQty: 15, delay: 2, reliability: 0.78, defectRate: 0.085, volumeLimit: 70, relationStep: 0.012 },
+  { id: "standard", title: "Стандарт", emoji: "📦", priceFactor: 1, quality: 0.94, minQty: 8, delay: 1, reliability: 0.9, defectRate: 0.04, volumeLimit: 50, relationStep: 0.009 },
+  { id: "premium", title: "Премиум", emoji: "✅", priceFactor: 1.18, quality: 0.99, minQty: 4, delay: 0, reliability: 0.98, defectRate: 0.012, volumeLimit: 35, relationStep: 0.006 }
+];
+
+const AD_STRATEGIES = [
+  { id: "none", title: "Без рекламы", emoji: "—", costFactor: 0, demandFactor: 1, risk: 0 },
+  { id: "economy", title: "Экономная", emoji: "🌱", costFactor: 0.55, demandFactor: 1.18, risk: 0.04 },
+  { id: "standard", title: "Стандарт", emoji: "📣", costFactor: 1, demandFactor: 1.45, risk: 0.08 },
+  { id: "aggressive", title: "Агрессивная", emoji: "🔥", costFactor: 1.85, demandFactor: 1.9, risk: 0.16 }
+];
+
+const CARD_UPGRADES = [
+  { id: "photos", title: "Фотографии", cost: 1400, demandBoost: 0.08, returnReduction: 0.03 },
+  { id: "seo", title: "SEO-описание", cost: 1800, demandBoost: 0.1, returnReduction: 0.02 },
+  { id: "infographics", title: "Инфографика", cost: 2400, demandBoost: 0.13, returnReduction: 0.04 },
+  { id: "video", title: "Видео", cost: 3600, demandBoost: 0.16, returnReduction: 0.03 }
 ];
 
 const MAX_UPGRADE_LEVEL = 5;
@@ -170,6 +212,15 @@ const UPGRADE_DEFS = [
     baseCost: 8400,
     costStep: 1.6,
     effect: "+3.5% к спросу за уровень"
+  },
+  {
+    id: "warehouse",
+    emoji: "🏬",
+    title: "Склад",
+    text: "Больше вместимость и меньше ежедневные расходы на хранение.",
+    baseCost: 6800,
+    costStep: 1.52,
+    effect: "+25 ед. вместимости и −6% хранения"
   }
 ];
 
@@ -218,18 +269,30 @@ const GOALS = [
 ];
 
 const defaultState = () => ({
+  saveVersion: SAVE_VERSION,
   day: 1,
-  balance: 50000,
+  balance: ECONOMY.startingBalance,
   rating: 4.5,
   totalRevenue: 0,
   totalProfit: 0,
   totalOrders: 0,
   inventory: {},
+  shipments: [],
+  suppliers: initialSupplierState(),
+  market: initialMarketState(),
+  competitors: initialCompetitorState(),
   upgrades: {},
   claimedGoals: [],
   dailyAction: "pricing",
   featuredProductId: null,
   marketEventId: "steady",
+  actionsUsed: 0,
+  dailyTask: null,
+  financeHistory: [],
+  marketHistory: [],
+  pendingEvent: null,
+  tutorial: { done: false, skipped: false, step: 0 },
+  rngSeed: Math.max(1, Date.now() % ECONOMY.rngModulus),
   lastReport: null,
   events: ["Магазин открыт. Закупите первый товар на вкладке «Рынок»."],
   createdAt: Date.now()
@@ -260,16 +323,7 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return defaultState();
     const parsed = JSON.parse(raw);
-    return {
-      ...defaultState(),
-      ...parsed,
-      inventory: parsed.inventory || {},
-      upgrades: parsed.upgrades || {},
-      claimedGoals: parsed.claimedGoals || [],
-      dailyAction: parsed.dailyAction || "pricing",
-      featuredProductId: parsed.featuredProductId || null,
-      marketEventId: parsed.marketEventId || "steady"
-    };
+    return migrateState(parsed);
   } catch (error) {
     console.warn("Не удалось загрузить сохранение", error);
     return defaultState();
@@ -280,6 +334,119 @@ function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
+function migrateState(saved) {
+  const base = defaultState();
+  const migratedInventory = {};
+  for (const [id, item] of Object.entries(saved.inventory || {})) {
+    const product = productById(id);
+    if (!product) continue;
+    migratedInventory[id] = normalizeInventoryItem(product, item);
+  }
+
+  const migrated = {
+    ...base,
+    ...saved,
+    saveVersion: SAVE_VERSION,
+    inventory: migratedInventory,
+    shipments: Array.isArray(saved.shipments) ? saved.shipments.filter(item => productById(item.productId)) : [],
+    suppliers: mergeDeep(base.suppliers, saved.suppliers || {}),
+    market: mergeDeep(base.market, saved.market || {}),
+    competitors: mergeDeep(base.competitors, saved.competitors || {}),
+    upgrades: saved.upgrades || {},
+    claimedGoals: Array.isArray(saved.claimedGoals) ? saved.claimedGoals : [],
+    dailyAction: DAILY_ACTIONS.some(action => action.id === saved.dailyAction) ? saved.dailyAction : "pricing",
+    featuredProductId: productById(saved.featuredProductId) ? saved.featuredProductId : null,
+    marketEventId: MARKET_EVENTS.some(event => event.id === saved.marketEventId) ? saved.marketEventId : "steady",
+    actionsUsed: clamp(Number(saved.actionsUsed || 0), 0, actionLimit(saved.upgrades || {})),
+    dailyTask: saved.dailyTask || createDailyTask(base.day),
+    financeHistory: Array.isArray(saved.financeHistory) ? saved.financeHistory.slice(-14) : [],
+    marketHistory: Array.isArray(saved.marketHistory) ? saved.marketHistory.slice(-14) : [],
+    pendingEvent: saved.pendingEvent || null,
+    tutorial: { ...base.tutorial, ...(saved.tutorial || {}) },
+    rngSeed: Number.isFinite(saved.rngSeed) && saved.rngSeed > 0 ? saved.rngSeed : base.rngSeed
+  };
+
+  if (!migrated.dailyTask) migrated.dailyTask = createDailyTask(migrated.day);
+  return migrated;
+}
+
+function normalizeInventoryItem(product, item = {}) {
+  const card = item.card || {};
+  return {
+    qty: Math.max(0, Math.floor(Number(item.qty || 0))),
+    price: Math.max(1, Number(item.price || product.marketPrice)),
+    adActive: Boolean(item.adActive),
+    adStrategy: item.adStrategy || (item.adActive ? "standard" : "none"),
+    supplierId: item.supplierId || "standard",
+    lifetimeSold: Math.max(0, Math.floor(Number(item.lifetimeSold || 0))),
+    card: {
+      level: clamp(Number(card.level || 0), 0, CARD_UPGRADES.length),
+      upgrades: Array.isArray(card.upgrades) ? card.upgrades.filter(id => CARD_UPGRADES.some(upgrade => upgrade.id === id)) : [],
+      rating: clamp(Number(card.rating || 4.3), 1, 5),
+      reviews: Math.max(0, Math.floor(Number(card.reviews || 0))),
+      trust: clamp(Number(card.trust || 0.62), 0, 1)
+    },
+    stopped: Boolean(item.stopped),
+    age: Math.max(0, Math.floor(Number(item.age || 0))),
+    damaged: Math.max(0, Math.floor(Number(item.damaged || 0)))
+  };
+}
+
+function mergeDeep(base, saved) {
+  const result = { ...base };
+  for (const [key, value] of Object.entries(saved || {})) {
+    if (value && typeof value === "object" && !Array.isArray(value) && base[key]) {
+      result[key] = mergeDeep(base[key], value);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+function initialSupplierState() {
+  return Object.fromEntries(PRODUCTS.map(product => [
+    product.id,
+    Object.fromEntries(SUPPLIERS.map(supplier => [supplier.id, { relation: 0, unlocked: true }]))
+  ]));
+}
+
+function initialMarketState() {
+  return Object.fromEntries(PRODUCTS.map(product => {
+    const demand = product.demand;
+    return [product.id, {
+      price: product.marketPrice,
+      demand,
+      trend: "stable",
+      trendPower: 0,
+      competitors: product.competition,
+      saturation: clamp(product.competition / 10, 0.2, 0.95),
+      life: product.shelfLife,
+      history: [{
+        day: 1,
+        price: product.marketPrice,
+        demand,
+        trend: "stable",
+        competitors: product.competition
+      }]
+    }];
+  }));
+}
+
+function initialCompetitorState() {
+  const strategies = ["Демпинг", "Премиум", "Агрессивная реклама"];
+  return Object.fromEntries(PRODUCTS.map(product => [
+    product.id,
+    strategies.map((strategy, index) => ({
+      strategy,
+      price: Math.round(product.marketPrice * [0.88, 1.18, 1.02][index] / 10) * 10,
+      rating: [4.1, 4.8, 4.4][index],
+      ads: [0.4, 0.25, 0.85][index],
+      sales: Math.max(1, Math.round(product.demand * [1.25, 0.65, 1.05][index]))
+    }))
+  ]));
+}
+
 function money(value) {
   return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(Math.round(value)) + " ₽";
 }
@@ -288,8 +455,61 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+function actionLimit(upgrades = state?.upgrades || {}) {
+  return ECONOMY.baseActionLimit + Math.floor(Number(upgrades.analytics || 0) / 2);
+}
+
+function actionsLeft() {
+  return Math.max(0, actionLimit() - state.actionsUsed);
+}
+
+function spendActionPoint(label) {
+  if (actionsLeft() <= 0) {
+    notify(`Не хватает очков управления для действия «${label}»`);
+    return false;
+  }
+  state.actionsUsed += 1;
+  return true;
+}
+
+function warehouseCapacity() {
+  return ECONOMY.baseWarehouseCapacity + upgradeLevel("warehouse") * 25;
+}
+
+function storageUsed(extraShipments = false) {
+  const stock = Object.entries(state.inventory).reduce((sum, [id, item]) => {
+    const product = productById(id);
+    return sum + (product ? item.qty * product.volume : 0);
+  }, 0);
+  if (!extraShipments) return stock;
+  return stock + state.shipments.reduce((sum, shipment) => {
+    const product = productById(shipment.productId);
+    return sum + (product ? shipment.qty * product.volume : 0);
+  }, 0);
+}
+
+function currentMarket(productOrId) {
+  const product = typeof productOrId === "string" ? productById(productOrId) : productOrId;
+  if (!product) return { price: 1, demand: 1, trend: "stable", competitors: 1, history: [] };
+  return state?.market?.[product.id] || initialMarketState()[product.id];
+}
+
+function supplierById(id) {
+  return SUPPLIERS.find(supplier => supplier.id === id) || SUPPLIERS[1];
+}
+
+function adStrategyById(id) {
+  return AD_STRATEGIES.find(strategy => strategy.id === id) || AD_STRATEGIES[0];
+}
+
+function random() {
+  if (!state?.rngSeed) return Math.random();
+  state.rngSeed = (state.rngSeed * ECONOMY.rngMultiplier) % ECONOMY.rngModulus;
+  return state.rngSeed / ECONOMY.rngModulus;
+}
+
 function randomBetween(min, max) {
-  return min + Math.random() * (max - min);
+  return min + random() * (max - min);
 }
 
 function vibrate(type = "light") {
@@ -332,10 +552,13 @@ function featuredProduct() {
   return productById(state.featuredProductId);
 }
 
-function purchaseCost(product) {
+function purchaseCost(product, supplierId = null) {
   const action = currentDailyAction();
-  const discount = action.purchaseDiscount || 0;
-  return Math.round(product.cost * (1 - discount));
+  const supplier = supplierById(supplierId || state.inventory[product.id]?.supplierId || "standard");
+  const relation = state.suppliers?.[product.id]?.[supplier.id]?.relation || 0;
+  const actionDiscount = action.purchaseDiscount || 0;
+  const relationDiscount = clamp(relation * 0.08, 0, 0.12);
+  return Math.max(1, Math.round(product.cost * supplier.priceFactor * (1 - actionDiscount - relationDiscount)));
 }
 
 function inventoryValue() {
@@ -394,18 +617,24 @@ function effectiveReturnLogisticsCost() {
 
 function effectiveReturnRate(product) {
   const event = currentMarketEvent();
+  const item = state.inventory[product.id];
+  const supplier = supplierById(item?.supplierId || "standard");
+  const cardReduction = (item?.card?.upgrades?.length || 0) * 0.018;
   const serviceReduction = 1 - upgradeLevel("logistics") * 0.035 - upgradeLevel("brand") * 0.015;
-  return clamp(product.returnRate * (event.returnMultiplier || 1) * serviceReduction, 0.005, 0.24);
+  const supplierRisk = 1 + (1 - supplier.quality) * 1.25 + supplier.defectRate * 1.5;
+  return clamp(product.returnRate * (event.returnMultiplier || 1) * serviceReduction * supplierRisk * (1 - cardReduction), 0.005, 0.32);
 }
 
 function productDemandMultiplier(product) {
   const event = currentMarketEvent();
+  const item = state.inventory[product.id];
   const categoryBoost = event.categoryBoosts?.[product.category] || 1;
   const brandBoost = 1 + upgradeLevel("brand") * 0.025;
   const analyticsBoost = 1 + upgradeLevel("analytics") * 0.035;
+  const cardBoost = 1 + (item?.card?.upgrades?.length || 0) * 0.08 + (item?.card?.trust || 0) * 0.12;
   const actionBoost = currentDailyAction().demandMultiplier || 1;
   const featuredBoost = state.featuredProductId === product.id ? 1.34 : 1;
-  return (event.demandMultiplier || 1) * categoryBoost * brandBoost * analyticsBoost * actionBoost * featuredBoost;
+  return (event.demandMultiplier || 1) * categoryBoost * brandBoost * analyticsBoost * cardBoost * actionBoost * featuredBoost;
 }
 
 function competitionFactor(product) {
@@ -415,14 +644,22 @@ function competitionFactor(product) {
 
 function priceDemandFactor(product, price, sensitivity = 1) {
   if (!Number.isFinite(price) || price <= 0) return 0;
-  if (price >= product.marketPrice * ZERO_DEMAND_PRICE_RATIO) return 0;
-  return clamp(Math.pow(product.marketPrice / price, sensitivity), 0, 1.8);
+  const marketPrice = currentMarket(product).price || product.marketPrice;
+  if (price >= marketPrice * ZERO_DEMAND_PRICE_RATIO) return 0;
+  const ratio = price / marketPrice;
+  if (ratio <= 0.8) return 1.75;
+  if (ratio <= 1) return clamp(1.28 - (ratio - 0.8) * 1.15, 1.05, 1.75);
+  if (ratio <= 1.2) return clamp(1.05 - (ratio - 1) * 1.35 * sensitivity, 0.74, 1.05);
+  if (ratio <= 1.5) return clamp(0.74 - (ratio - 1.2) * 1.45 * sensitivity, 0.26, 0.74);
+  return clamp(0.26 - (ratio - 1.5) * 0.82 * sensitivity, 0, 0.26);
 }
 
 function priceDemandChance(product, price) {
   const event = currentMarketEvent();
   const action = currentDailyAction();
-  const sensitivity = (event.priceSensitivity || 1) * (action.priceSensitivityMultiplier || 1);
+  const market = currentMarket(product);
+  const trendRelief = ["viral", "growing"].includes(market.trend) ? 0.82 : 1;
+  const sensitivity = (event.priceSensitivity || 1) * (action.priceSensitivityMultiplier || 1) * (product.priceSensitivity || 1) * trendRelief;
   const factor = priceDemandFactor(product, price, sensitivity);
   return Math.round(clamp(factor / 1.45 * 100, 0, 100));
 }
@@ -430,9 +667,162 @@ function priceDemandChance(product, price) {
 function productRiskLabel(product, price) {
   const chance = priceDemandChance(product, price);
   if (chance === 0) return { label: "Спрос 0%", className: "bad" };
-  if (price > product.marketPrice * 1.45) return { label: `Риск: ${chance}%`, className: "bad" };
-  if (price > product.marketPrice * 1.12) return { label: `Спрос: ${chance}%`, className: "" };
+  const marketPrice = currentMarket(product).price || product.marketPrice;
+  if (price > marketPrice * 1.45) return { label: `Риск: ${chance}%`, className: "bad" };
+  if (price > marketPrice * 1.12) return { label: `Спрос: ${chance}%`, className: "" };
   return { label: `Спрос: ${chance}%`, className: "good" };
+}
+
+function salesForecast(product, item = state.inventory[product.id]) {
+  if (!item || item.stopped || item.qty <= 0) return { min: 0, max: 0, expected: 0 };
+  const market = currentMarket(product);
+  const action = currentDailyAction();
+  const strategy = adStrategyById(item.adStrategy || "none");
+  const sensitivity = (market.trend === "viral" ? 0.82 : 1) * (product.priceSensitivity || 1) * (action.priceSensitivityMultiplier || 1);
+  const priceFactor = priceDemandFactor(product, item.price, sensitivity);
+  const ratingFactor = clamp(state.rating / 4.5, 0.62, 1.18);
+  const competitorPressure = clamp(1.24 - market.competitors * 0.045, 0.45, 1.12);
+  const expected = market.demand * 1.3 * priceFactor * productDemandMultiplier(product) * ratingFactor * competitorPressure * strategy.demandFactor;
+  return {
+    min: Math.max(0, Math.floor(expected * 0.65)),
+    max: Math.max(0, Math.ceil(expected * 1.35)),
+    expected: Math.max(0, expected)
+  };
+}
+
+function updateMarketForNewDay() {
+  const snapshots = [];
+  for (const product of PRODUCTS) {
+    const market = currentMarket(product);
+    let trend = market.trend || "stable";
+    let trendPower = Number(market.trendPower || 0);
+
+    if (random() < product.trendChance * 0.18) {
+      const roll = random();
+      trend = roll > 0.82 ? "viral" : roll > 0.55 ? "growing" : roll > 0.28 ? "falling" : "saturated";
+      trendPower = randomBetween(0.08, trend === "viral" ? 0.32 : 0.18);
+    } else {
+      trendPower *= randomBetween(0.72, 0.94);
+      if (Math.abs(trendPower) < 0.025) trend = "stable";
+    }
+
+    const trendSign = trend === "growing" || trend === "viral" ? 1 : trend === "falling" || trend === "saturated" ? -1 : 0;
+    const competitorDrift = randomBetween(-0.45, 0.55) + (trend === "viral" ? 0.55 : trend === "saturated" ? 0.75 : 0);
+    const competitors = clamp(Math.round((market.competitors || product.competition) + competitorDrift), 1, 15);
+    const demandShift = trendSign * trendPower * 6 + randomBetween(-0.36, 0.36) - (competitors - product.competition) * 0.035;
+    const demand = clamp((market.demand || product.demand) + demandShift, 1, 12);
+    const priceShift = trendSign * trendPower + randomBetween(-0.035, 0.04) - (competitors - product.competition) * 0.006;
+    const price = Math.max(product.cost * 1.18, Math.round((market.price || product.marketPrice) * (1 + priceShift) / 10) * 10);
+    const saturation = clamp((market.saturation || product.competition / 10) + competitors * 0.003 - demand * 0.004, 0.1, 1);
+    const life = Math.max(0, (market.life ?? product.shelfLife) - (trend === "viral" ? 2 : 1));
+    const history = [...(market.history || []), { day: state.day, price, demand, trend, competitors }].slice(-10);
+
+    state.market[product.id] = { price, demand, trend, trendPower, competitors, saturation, life, history };
+    snapshots.push({ id: product.id, price, demand, trend, competitors });
+  }
+  state.marketHistory = [{ day: state.day, items: snapshots }, ...state.marketHistory].slice(0, 10);
+}
+
+function updateCompetitorsForNewDay() {
+  for (const product of PRODUCTS) {
+    const market = currentMarket(product);
+    const competitors = state.competitors[product.id] || [];
+    state.competitors[product.id] = competitors.map(competitor => {
+      const strategyBias = competitor.strategy === "Демпинг" ? -0.035 : competitor.strategy === "Премиум" ? 0.035 : 0;
+      const price = Math.max(product.cost, Math.round(competitor.price * (1 + strategyBias + randomBetween(-0.035, 0.035)) / 10) * 10);
+      const ads = clamp(competitor.ads + randomBetween(-0.08, 0.08), 0, 1);
+      const rating = clamp(competitor.rating + randomBetween(-0.035, 0.025), 3.2, 5);
+      const sales = Math.max(0, Math.round(market.demand * ads * (market.price / price) * randomBetween(0.6, 1.35)));
+      return { ...competitor, price, ads, rating, sales };
+    });
+  }
+}
+
+function trendLabel(trend) {
+  return {
+    stable: "стабилен",
+    growing: "растёт",
+    falling: "падает",
+    viral: "вирусный рост",
+    saturated: "перенасыщение"
+  }[trend] || "стабилен";
+}
+
+function createDailyTask(day = state.day) {
+  const templates = [
+    { id: "profit", title: "Закончить день с прибылью", target: 1, reward: 900 },
+    { id: "orders", title: "Продать 8 товаров", target: 8, reward: 1200 },
+    { id: "rating", title: "Сохранить рейтинг 4.50+", target: 450, reward: 1000 },
+    { id: "no_loss", title: "Не уйти в минус по балансу", target: 1, reward: 700 }
+  ];
+  return { ...templates[day % templates.length], done: false, claimed: false };
+}
+
+function evaluateDailyTask(report) {
+  const task = state.dailyTask || createDailyTask();
+  const success =
+    (task.id === "profit" && report.profit > 0) ||
+    (task.id === "orders" && report.sold >= task.target) ||
+    (task.id === "rating" && state.rating * 100 >= task.target) ||
+    (task.id === "no_loss" && state.balance >= 0);
+  if (success && !task.claimed) {
+    state.balance += task.reward;
+    state.events.unshift(`Ежедневная задача выполнена: «${task.title}». Награда ${money(task.reward)}.`);
+    state.dailyTask = { ...task, done: true, claimed: true };
+  } else {
+    state.dailyTask = { ...task, done: success };
+  }
+}
+
+function receiveDueShipments() {
+  const arrived = [];
+  const waiting = [];
+  for (const shipment of state.shipments) {
+    if (shipment.arrivalDay <= state.day) arrived.push(shipment);
+    else waiting.push(shipment);
+  }
+  state.shipments = waiting;
+
+  for (const shipment of arrived) {
+    const product = productById(shipment.productId);
+    if (!product) continue;
+    if (!state.inventory[product.id]) {
+      state.inventory[product.id] = normalizeInventoryItem(product, { qty: 0, price: currentMarket(product).price, supplierId: shipment.supplierId });
+    }
+    const supplier = supplierById(shipment.supplierId);
+    const failed = random() > supplier.reliability;
+    const defectRate = failed ? supplier.defectRate * 2.4 : supplier.defectRate;
+    const defective = Math.min(shipment.qty, Math.round(shipment.qty * defectRate * randomBetween(0.45, 1.4)));
+    const accepted = shipment.qty - defective;
+    state.inventory[product.id].qty += accepted;
+    state.inventory[product.id].damaged += defective;
+    state.inventory[product.id].supplierId = supplier.id;
+    state.suppliers[product.id][supplier.id].relation = clamp((state.suppliers[product.id][supplier.id].relation || 0) + supplier.relationStep, 0, 1);
+
+    const text = failed
+      ? `Поставка «${product.name}» пришла с проблемами: принято ${accepted} шт., брак ${defective} шт.`
+      : `Поставка «${product.name}» прибыла: ${accepted} шт.${defective ? `, брак ${defective} шт.` : ""}`;
+    state.events.unshift(text);
+  }
+  return arrived;
+}
+
+function holdingCost() {
+  const discount = 1 - upgradeLevel("warehouse") * 0.06;
+  return Math.round(storageUsed(false) * ECONOMY.storageCostPerUnit * Math.max(0.55, discount));
+}
+
+function activeStockProducts() {
+  return ownedProducts().filter(product => !state.inventory[product.id]?.stopped && state.inventory[product.id]?.qty > 0);
+}
+
+function cardUpgradeBoost(item) {
+  return (item?.card?.upgrades?.length || 0) * 0.08;
+}
+
+function nextCardUpgrade(item) {
+  const owned = new Set(item?.card?.upgrades || []);
+  return CARD_UPGRADES.find(upgrade => !owned.has(upgrade.id)) || null;
 }
 
 function goalValue(goal) {
@@ -469,10 +859,12 @@ function render() {
 function renderHome() {
   const report = state.lastReport;
   const stockUnits = Object.values(state.inventory).reduce((sum, item) => sum + item.qty, 0);
-  const activeAds = Object.values(state.inventory).filter(item => item.adActive).length;
+  const activeAds = Object.values(state.inventory).filter(item => (item.adStrategy || (item.adActive ? "standard" : "none")) !== "none").length;
   const marketEvent = currentMarketEvent();
   const action = currentDailyAction();
   const featured = featuredProduct();
+  const task = state.dailyTask || createDailyTask();
+  const warehouse = `${storageUsed(true)}/${warehouseCapacity()}`;
 
   view.innerHTML = `
     <section class="hero">
@@ -482,10 +874,24 @@ function renderHome() {
         <span class="hero-pill">⭐ ${state.rating.toFixed(2)}</span>
         <span class="hero-pill">📦 ${stockUnits} шт.</span>
         <span class="hero-pill">📣 ${activeAds} реклам.</span>
-        <span class="hero-pill">${action.emoji} Фокус дня</span>
+        <span class="hero-pill">${action.emoji} Фокус</span>
+        <span class="hero-pill">⚙️ ${actionsLeft()}/${actionLimit()}</span>
       </div>
       <button id="next-day" class="primary-btn" type="button" ${stockUnits === 0 ? "disabled" : ""}>Завершить день</button>
     </section>
+
+    ${!state.tutorial.done && !state.tutorial.skipped ? `
+      <section class="section">
+        <article class="card tutorial-card">
+          <div>
+            <div class="section-note">Быстрый старт</div>
+            <h2>${GAME_TITLE}</h2>
+            <p>Выберите товар на рынке, закажите поставку, задайте цену около рынка и следите за прогнозом спроса. Цена от 180% рынка даёт 0 продаж.</p>
+          </div>
+          <button class="secondary-btn" id="skip-tutorial" type="button">Понятно</button>
+        </article>
+      </section>
+    ` : ""}
 
     <section class="section">
       <article class="card market-event-card">
@@ -497,6 +903,19 @@ function renderHome() {
         </div>
       </article>
     </section>
+
+    ${state.pendingEvent ? `
+      <section class="section">
+        <article class="card decision-card">
+          <div>
+            <div class="section-note">Требуется решение</div>
+            <h2>${escapeHtml(state.pendingEvent.title)}</h2>
+            <p>${escapeHtml(state.pendingEvent.text)}</p>
+          </div>
+          <button class="primary-btn" id="resolve-event" type="button">Решить</button>
+        </article>
+      </section>
+    ` : ""}
 
     <section class="section">
       <div class="section-heading">
@@ -513,6 +932,26 @@ function renderHome() {
           </button>
         `).join("")}
       </div>
+    </section>
+
+    <section class="section">
+      <div class="metrics-grid">
+        <article class="metric-card"><div class="metric-label">Очки управления</div><div class="metric-value">${actionsLeft()}/${actionLimit()}</div></article>
+        <article class="metric-card"><div class="metric-label">Склад</div><div class="metric-value">${warehouse}</div></article>
+        <article class="metric-card"><div class="metric-label">Поставки в пути</div><div class="metric-value">${state.shipments.length}</div></article>
+        <article class="metric-card"><div class="metric-label">Хранение/день</div><div class="metric-value">${money(holdingCost())}</div></article>
+      </div>
+    </section>
+
+    <section class="section">
+      <article class="card decision-card">
+        <div>
+          <div class="section-note">Задача дня</div>
+          <h2>${escapeHtml(task.title)}</h2>
+          <p>Награда: ${money(task.reward)}. Выполнится автоматически в отчёте дня.</p>
+        </div>
+        <span class="tag ${task.claimed ? "good" : ""}">${task.claimed ? "Выполнено" : "Активно"}</span>
+      </article>
     </section>
 
     <section class="section">
@@ -544,12 +983,16 @@ function renderHome() {
           <div class="report-row"><span>Фокус</span><strong>${escapeHtml(report.focus || "Обычный день")}</strong></div>
           ${report.featured ? `<div class="report-row"><span>Товар дня</span><strong>${escapeHtml(report.featured)}</strong></div>` : ""}
           <div class="report-row"><span>Выручка</span><strong>${money(report.revenue)}</strong></div>
+          <div class="report-row"><span>Себестоимость</span><strong>−${money(report.costOfGoods || 0)}</strong></div>
           <div class="report-row"><span>Возвраты</span><strong>−${money(report.refunds)}</strong></div>
           <div class="report-row"><span>Комиссия</span><strong>−${money(report.commission)}</strong></div>
           <div class="report-row"><span>Логистика</span><strong>−${money(report.logistics)}</strong></div>
           <div class="report-row"><span>Реклама</span><strong>−${money(report.ads)}</strong></div>
+          <div class="report-row"><span>Хранение</span><strong>−${money(report.storageCost || 0)}</strong></div>
+          <div class="report-row"><span>Упущенные продажи</span><strong>${report.missedSales || 0}</strong></div>
           ${report.operations ? `<div class="report-row"><span>Фокус и витрина</span><strong>−${money(report.operations)}</strong></div>` : ""}
           <div class="report-row total"><span>Прибыль дня</span><strong class="${report.profit >= 0 ? "positive" : "negative"}">${money(report.profit)}</strong></div>
+          ${(report.reasons || []).slice(0, 3).map(reason => `<div class="event-item"><span class="event-icon">i</span><span>${escapeHtml(reason)}</span></div>`).join("")}
         </article>
       </section>
     ` : ""}
@@ -563,6 +1006,12 @@ function renderHome() {
   `;
 
   document.getElementById("next-day")?.addEventListener("click", simulateDay);
+  document.getElementById("resolve-event")?.addEventListener("click", renderDecisionEventModal);
+  document.getElementById("skip-tutorial")?.addEventListener("click", () => {
+    state.tutorial.skipped = true;
+    saveState();
+    renderHome();
+  });
   document.querySelectorAll(".focus-card").forEach(button => button.addEventListener("click", () => setDailyAction(button.dataset.action)));
   document.getElementById("open-stock-from-decision")?.addEventListener("click", () => switchTab("stock"));
   document.querySelectorAll(".claim-goal").forEach(button => button.addEventListener("click", () => claimGoal(button.dataset.id)));
@@ -613,14 +1062,16 @@ function renderMarket() {
   view.innerHTML = `
     <section class="card">
       <h2>Каталог поставщиков</h2>
-      <p style="color:var(--muted);margin-bottom:0">Закупайте товары, выставляйте цену и проверяйте прибыльность. Деньги списываются сразу.</p>
+      <p style="color:var(--muted);margin-bottom:0">Сравнивайте тренд, конкурентов, цену рынка и поставщиков. Заказ может прийти не сразу.</p>
     </section>
     <div class="catalog-grid">
       ${PRODUCTS.map(product => {
         const current = state.inventory[product.id];
-        const margin = grossMargin(product, product.marketPrice);
+        const market = currentMarket(product);
+        const margin = grossMargin(product, market.price);
         const currentCost = purchaseCost(product);
         const supplierDiscount = currentCost < product.cost;
+        const history = (market.history || []).slice(-5);
         return `
           <article class="card">
             <div class="card-top">
@@ -632,10 +1083,15 @@ function renderMarket() {
             </div>
             <div class="tags">
               ${supplierDiscount ? `<span class="tag good">Скидка поставщика ${Math.round((1 - currentCost / product.cost) * 100)}%</span>` : ""}
-              <span class="tag">Рынок: ${money(product.marketPrice)}</span>
+              <span class="tag">Рынок: ${money(market.price)}</span>
+              <span class="tag">Тренд: ${trendLabel(market.trend)}</span>
+              <span class="tag">Конкуренты: ${market.competitors}</span>
               <span class="tag ${margin > 250 ? "good" : ""}">Маржа ≈ ${money(margin)}</span>
-              <span class="tag">Спрос ${product.demand}/10</span>
+              <span class="tag">Спрос ${market.demand.toFixed(1)}/12</span>
               <span class="tag ${product.returnRate >= .09 ? "bad" : ""}">Возвраты ${Math.round(product.returnRate * 100)}%</span>
+            </div>
+            <div class="sparkline" aria-label="История цены">
+              ${history.map(point => `<span style="height:${clamp(point.price / product.marketPrice * 32, 8, 42)}px" title="${money(point.price)}"></span>`).join("")}
             </div>
             <div class="product-actions">
               <button class="primary-btn buy-btn" data-id="${product.id}" type="button">Закупить</button>
@@ -673,10 +1129,17 @@ function renderStock() {
     </section>
     ${products.map(product => {
       const item = state.inventory[product.id];
+      item.adStrategy = item.adStrategy || (item.adActive ? "standard" : "none");
+      item.card = normalizeInventoryItem(product, item).card;
+      const market = currentMarket(product);
       const margin = grossMargin(product, item.price);
       const stockPercent = clamp(item.qty / 50 * 100, 0, 100);
       const risk = productRiskLabel(product, item.price);
-      const zeroPrice = Math.round(product.marketPrice * ZERO_DEMAND_PRICE_RATIO / 10) * 10;
+      const zeroPrice = Math.round(market.price * ZERO_DEMAND_PRICE_RATIO / 10) * 10;
+      const pricePercent = Math.round(item.price / market.price * 100);
+      const forecast = salesForecast(product, item);
+      const competitors = (state.competitors[product.id] || []).slice(0, 2);
+      const nextUpgrade = nextCardUpgrade(item);
       const isFeatured = state.featuredProductId === product.id;
       return `
         <article class="card ${isFeatured ? "featured-card" : ""}">
@@ -697,20 +1160,38 @@ function renderStock() {
               <button class="small-btn save-price" data-id="${product.id}" type="button">Сохранить</button>
             </div>
             <div class="tags">
-              <span class="tag">Средняя цена: ${money(product.marketPrice)}</span>
+              <span class="tag">Рынок: ${money(market.price)}</span>
+              <span class="tag">Цена: ${pricePercent}% рынка</span>
+              <span class="tag">Прогноз: ${forecast.min}-${forecast.max} шт.</span>
               <span class="tag bad">0% спроса от ${money(zeroPrice)}</span>
               <span class="tag ${risk.className}">${risk.label}</span>
               <span class="tag ${margin >= 0 ? "good" : "bad"}">Маржа: ${money(margin)}</span>
             </div>
-            <div class="toggle-row">
-              <div><strong>Продвижение</strong><div class="product-category">+показы зависят от маркетинга, ${money(effectiveAdCost())}/день</div></div>
-              <label class="switch">
-                <input class="ad-toggle" data-id="${product.id}" type="checkbox" ${item.adActive ? "checked" : ""} />
-                <span class="slider"></span>
-              </label>
+            <div class="mini-panel">
+              <strong>Конкуренты</strong>
+              ${competitors.map(competitor => `<span>${escapeHtml(competitor.strategy)}: ${money(competitor.price)}, рейтинг ${competitor.rating.toFixed(1)}</span>`).join("")}
             </div>
+            <div class="ad-grid">
+              ${AD_STRATEGIES.map(strategy => `
+                <button class="ad-option ${item.adStrategy === strategy.id ? "active" : ""}" data-id="${product.id}" data-ad="${strategy.id}" type="button">
+                  <span>${strategy.emoji}</span>
+                  <strong>${escapeHtml(strategy.title)}</strong>
+                  <small>${strategy.costFactor ? money(Math.round(effectiveAdCost() * strategy.costFactor)) : "0 ₽"}</small>
+                </button>
+              `).join("")}
+            </div>
+            <div class="mini-panel">
+              <strong>Карточка: рейтинг ${item.card.rating.toFixed(2)}, отзывов ${item.card.reviews}</strong>
+              <span>Улучшения: ${item.card.upgrades.length ? item.card.upgrades.map(id => CARD_UPGRADES.find(upgrade => upgrade.id === id)?.title).filter(Boolean).join(", ") : "нет"}</span>
+            </div>
+            <button class="secondary-btn improve-card-btn" data-id="${product.id}" type="button" ${nextUpgrade ? "" : "disabled"}>
+              ${nextUpgrade ? `Улучшить: ${nextUpgrade.title} (${money(nextUpgrade.cost)})` : "Карточка улучшена полностью"}
+            </button>
             <button class="secondary-btn feature-btn" data-id="${product.id}" type="button">
               ${isFeatured ? "Убрать с витрины дня" : `Сделать товаром дня (${money(FEATURED_PRODUCT_COST)}/день)`}
+            </button>
+            <button class="secondary-btn stop-sale-btn" data-id="${product.id}" type="button">
+              ${item.stopped ? "Вернуть в продажу" : "Остановить продажи"}
             </button>
             <button class="secondary-btn restock-btn" data-id="${product.id}" type="button">Докупить товар</button>
           </div>
@@ -720,8 +1201,10 @@ function renderStock() {
   `;
 
   document.querySelectorAll(".save-price").forEach(button => button.addEventListener("click", () => updatePrice(button.dataset.id)));
-  document.querySelectorAll(".ad-toggle").forEach(toggle => toggle.addEventListener("change", () => toggleAd(toggle.dataset.id, toggle.checked)));
+  document.querySelectorAll(".ad-option").forEach(button => button.addEventListener("click", () => setAdStrategy(button.dataset.id, button.dataset.ad)));
+  document.querySelectorAll(".improve-card-btn").forEach(button => button.addEventListener("click", () => improveCard(button.dataset.id)));
   document.querySelectorAll(".feature-btn").forEach(button => button.addEventListener("click", () => toggleFeaturedProduct(button.dataset.id)));
+  document.querySelectorAll(".stop-sale-btn").forEach(button => button.addEventListener("click", () => toggleSaleStopped(button.dataset.id)));
   document.querySelectorAll(".restock-btn").forEach(button => button.addEventListener("click", () => openPurchase(button.dataset.id)));
 }
 
@@ -841,22 +1324,33 @@ function openPurchase(productId) {
   purchaseProductId = productId;
   const product = productById(productId);
   if (!product) return;
-  const unitCost = purchaseCost(product);
+  let selectedSupplierId = state.inventory[productId]?.supplierId || "standard";
+  let unitCost = purchaseCost(product, selectedSupplierId);
 
   modalContent.innerHTML = `
     <div class="modal-product">
       <div class="product-emoji">${product.emoji}</div>
       <div><h2 id="modal-title" style="margin-bottom:3px">${escapeHtml(product.name)}</h2><div class="product-category">Закупка у поставщика</div></div>
     </div>
+    <div class="supplier-grid">
+      ${SUPPLIERS.map(supplier => `
+        <button class="supplier-option ${supplier.id === selectedSupplierId ? "active" : ""}" data-supplier="${supplier.id}" type="button">
+          <span>${supplier.emoji}</span>
+          <strong>${escapeHtml(supplier.title)}</strong>
+          <small>${money(purchaseCost(product, supplier.id))} · мин. ${supplier.minQty} · ${supplier.delay ? `${supplier.delay} дн.` : "сразу"}</small>
+        </button>
+      `).join("")}
+    </div>
     <div class="field"><label for="purchase-qty">Количество</label></div>
     <div class="qty-picker">
       <button id="qty-minus" type="button">−</button>
-      <input id="purchase-qty" type="number" min="1" max="999" value="10" inputmode="numeric" />
+      <input id="purchase-qty" type="number" min="1" max="999" value="${supplierById(selectedSupplierId).minQty}" inputmode="numeric" />
       <button id="qty-plus" type="button">+</button>
     </div>
     <div class="cost-box">
       <div class="report-row"><span>Цена за штуку</span><strong>${money(unitCost)}</strong></div>
-      <div class="report-row total"><span>Сумма закупки</span><strong id="purchase-total">${money(unitCost * 10)}</strong></div>
+      <div class="report-row"><span>Поставка</span><strong id="supplier-delay">${supplierById(selectedSupplierId).delay ? `${supplierById(selectedSupplierId).delay} дн.` : "сразу"}</strong></div>
+      <div class="report-row total"><span>Сумма закупки</span><strong id="purchase-total">${money(unitCost * supplierById(selectedSupplierId).minQty)}</strong></div>
     </div>
     <button id="confirm-purchase" class="primary-btn" type="button">Купить партию</button>
   `;
@@ -866,21 +1360,36 @@ function openPurchase(productId) {
 
   const qtyInput = document.getElementById("purchase-qty");
   const total = document.getElementById("purchase-total");
+  const delay = document.getElementById("supplier-delay");
   const confirm = document.getElementById("confirm-purchase");
 
   const refreshTotal = () => {
-    const qty = clamp(Number.parseInt(qtyInput.value, 10) || 1, 1, 999);
+    const supplier = supplierById(selectedSupplierId);
+    unitCost = purchaseCost(product, selectedSupplierId);
+    const qty = clamp(Number.parseInt(qtyInput.value, 10) || supplier.minQty, supplier.minQty, supplier.volumeLimit);
     qtyInput.value = qty;
     const cost = qty * unitCost;
+    const reservedVolume = storageUsed(true) + qty * product.volume;
     total.textContent = money(cost);
-    confirm.disabled = cost > state.balance;
-    confirm.textContent = cost > state.balance ? "Недостаточно денег" : "Купить партию";
+    delay.textContent = supplier.delay ? `${supplier.delay} дн.` : "сразу";
+    confirm.disabled = cost > state.balance || reservedVolume > warehouseCapacity();
+    confirm.textContent = cost > state.balance
+      ? "Недостаточно денег"
+      : reservedVolume > warehouseCapacity()
+        ? "Не хватает склада"
+        : supplier.delay ? "Заказать поставку" : "Купить партию";
   };
 
+  document.querySelectorAll(".supplier-option").forEach(button => button.addEventListener("click", () => {
+    selectedSupplierId = button.dataset.supplier;
+    document.querySelectorAll(".supplier-option").forEach(option => option.classList.toggle("active", option.dataset.supplier === selectedSupplierId));
+    qtyInput.value = Math.max(Number(qtyInput.value || 0), supplierById(selectedSupplierId).minQty);
+    refreshTotal();
+  }));
   qtyInput.addEventListener("input", refreshTotal);
   document.getElementById("qty-minus").addEventListener("click", () => { qtyInput.value = Math.max(1, Number(qtyInput.value || 1) - 1); refreshTotal(); });
   document.getElementById("qty-plus").addEventListener("click", () => { qtyInput.value = Math.min(999, Number(qtyInput.value || 1) + 1); refreshTotal(); });
-  confirm.addEventListener("click", () => buyProduct(productId, Number.parseInt(qtyInput.value, 10)));
+  confirm.addEventListener("click", () => buyProduct(productId, Number.parseInt(qtyInput.value, 10), selectedSupplierId));
   refreshTotal();
 }
 
@@ -890,21 +1399,37 @@ function closeModal() {
   purchaseProductId = null;
 }
 
-function buyProduct(productId, quantity) {
+function buyProduct(productId, quantity, supplierId = "standard") {
   const product = productById(productId);
+  const supplier = supplierById(supplierId);
   const qty = clamp(Number.parseInt(quantity, 10) || 1, 1, 999);
-  const cost = purchaseCost(product) * qty;
+  const cost = purchaseCost(product, supplier.id) * qty;
+  const reservedVolume = storageUsed(true) + qty * product.volume;
   if (cost > state.balance) {
     notify("Недостаточно денег для этой закупки");
+    return;
+  }
+  if (qty < supplier.minQty) {
+    notify(`Минимальная партия: ${supplier.minQty} шт.`);
+    return;
+  }
+  if (reservedVolume > warehouseCapacity()) {
+    notify("Склад переполнится. Улучшите склад или закажите меньше.");
     return;
   }
 
   state.balance -= cost;
   if (!state.inventory[productId]) {
-    state.inventory[productId] = { qty: 0, price: product.marketPrice, adActive: false, lifetimeSold: 0 };
+    state.inventory[productId] = normalizeInventoryItem(product, { qty: 0, price: currentMarket(product).price, supplierId: supplier.id });
   }
-  state.inventory[productId].qty += qty;
-  state.events.unshift(`Закуплено ${qty} шт. товара «${product.name}» за ${money(cost)}.`);
+  state.inventory[productId].supplierId = supplier.id;
+  if (supplier.delay > 0) {
+    state.shipments.push({ id: `${Date.now()}-${random().toString(36).slice(2)}`, productId, qty, supplierId: supplier.id, cost, orderDay: state.day, arrivalDay: state.day + supplier.delay });
+    state.events.unshift(`Заказана поставка «${product.name}»: ${qty} шт., прибытие день ${state.day + supplier.delay}.`);
+  } else {
+    state.inventory[productId].qty += qty;
+    state.events.unshift(`Закуплено ${qty} шт. товара «${product.name}» за ${money(cost)}.`);
+  }
   saveState();
   closeModal();
   vibrate("medium");
@@ -919,6 +1444,7 @@ function updatePrice(productId) {
     notify("Введите корректную цену");
     return;
   }
+  if (Math.round(state.inventory[productId].price) !== price && !spendActionPoint("изменить цену")) return;
   state.inventory[productId].price = price;
   saveState();
   vibrate("light");
@@ -926,11 +1452,53 @@ function updatePrice(productId) {
   renderStock();
 }
 
-function toggleAd(productId, enabled) {
-  state.inventory[productId].adActive = enabled;
+function setAdStrategy(productId, strategyId) {
+  const item = state.inventory[productId];
+  if (!item || !AD_STRATEGIES.some(strategy => strategy.id === strategyId)) return;
+  item.adStrategy = strategyId;
+  item.adActive = strategyId !== "none";
   saveState();
   vibrate("light");
-  notify(enabled ? "Реклама включена" : "Реклама выключена");
+  notify(`Реклама: ${adStrategyById(strategyId).title}`);
+  renderStock();
+}
+
+function improveCard(productId) {
+  const product = productById(productId);
+  const item = state.inventory[productId];
+  if (!product || !item) return;
+  const upgrade = nextCardUpgrade(item);
+  if (!upgrade) {
+    notify("Карточка уже полностью улучшена");
+    return;
+  }
+  if (state.balance < upgrade.cost) {
+    notify("Не хватает денег на улучшение карточки");
+    return;
+  }
+  if (!spendActionPoint("улучшить карточку")) return;
+  state.balance -= upgrade.cost;
+  item.card.upgrades.push(upgrade.id);
+  item.card.level = item.card.upgrades.length;
+  item.card.trust = clamp(item.card.trust + 0.07, 0, 1);
+  state.events.unshift(`Карточка «${product.name}» улучшена: ${upgrade.title}.`);
+  saveState();
+  vibrate("medium");
+  notify(`Карточка улучшена: ${upgrade.title}`);
+  renderStock();
+}
+
+function toggleSaleStopped(productId) {
+  const product = productById(productId);
+  const item = state.inventory[productId];
+  if (!product || !item) return;
+  if (!spendActionPoint(item.stopped ? "вернуть товар" : "остановить товар")) return;
+  item.stopped = !item.stopped;
+  if (item.stopped && state.featuredProductId === productId) state.featuredProductId = null;
+  state.events.unshift(item.stopped ? `Продажи «${product.name}» остановлены.` : `«${product.name}» снова в продаже.`);
+  saveState();
+  vibrate("light");
+  renderStock();
 }
 
 function claimGoal(goalId) {
@@ -981,7 +1549,8 @@ function estimateReturns(sold, returnRate) {
 }
 
 function simulateDay() {
-  const products = ownedProducts();
+  receiveDueShipments();
+  const products = activeStockProducts();
   if (products.length === 0) {
     notify("Сначала закупите товар");
     return;
@@ -998,25 +1567,34 @@ function simulateDay() {
   const marketingBoost = 1 + upgradeLevel("marketing") * 0.1;
   const priceSensitivity = (marketEvent.priceSensitivity || 1) * (action.priceSensitivityMultiplier || 1);
   const operations = action.cost + (activeFeatured ? FEATURED_PRODUCT_COST : 0);
+  const storageCost = holdingCost();
   let revenue = 0;
   let refunds = 0;
+  let costOfGoods = 0;
   let commission = 0;
   let logistics = 0;
   let ads = 0;
   let soldTotal = 0;
   let returnsTotal = 0;
+  let missedSales = 0;
   const productEvents = [];
+  const saleReasons = [];
 
   for (const product of products) {
     const item = state.inventory[product.id];
     if (!item || item.qty <= 0) continue;
+    item.adStrategy = item.adStrategy || (item.adActive ? "standard" : "none");
+    item.card = normalizeInventoryItem(product, item).card;
+    const market = currentMarket(product);
+    const strategy = adStrategyById(item.adStrategy);
+    const supplier = supplierById(item.supplierId);
 
     const priceFactor = priceDemandFactor(product, item.price, priceSensitivity);
     const ratingFactor = clamp(state.rating / 4.5, 0.65, 1.15);
-    const adFactor = item.adActive ? 1.7 * marketingBoost : 1;
+    const adFactor = strategy.demandFactor * marketingBoost;
     const noise = randomBetween(0.72, 1.28);
-    const demandBase = product.demand * 1.45;
-    let sold = Math.round(
+    const demandBase = market.demand * 1.45;
+    const interested = Math.round(
       demandBase *
       productDemandMultiplier(product) *
       priceFactor *
@@ -1025,33 +1603,47 @@ function simulateDay() {
       adFactor *
       noise
     );
-    sold = clamp(sold, 0, item.qty);
+    let sold = clamp(interested, 0, item.qty);
+    missedSales += Math.max(0, interested - item.qty);
 
     const returns = estimateReturns(sold, effectiveReturnRate(product) * (action.returnMultiplier || 1));
     const netSold = sold - returns;
     const itemRevenue = sold * item.price;
     const itemRefunds = returns * item.price;
+    const itemCost = netSold * purchaseCost(product, item.supplierId);
     const itemCommission = netSold * item.price * COMMISSION_RATE;
     const itemLogistics = sold * deliveryCost + returns * returnLogisticsCost;
-    const itemAds = item.adActive ? adCost : 0;
+    const itemAds = Math.round(adCost * strategy.costFactor);
 
     item.qty -= sold;
     item.qty += returns;
     item.lifetimeSold = (item.lifetimeSold || 0) + netSold;
+    item.age += 1;
+    item.card.reviews += Math.max(0, Math.round(netSold * randomBetween(0.08, 0.22)));
+    const reviewDelta = netSold > 0
+      ? (supplier.quality - 0.9) * 0.05 + (returns > sold * 0.12 ? -0.06 : 0.015)
+      : -0.005;
+    item.card.rating = clamp(item.card.rating + reviewDelta, 1, 5);
+    item.card.trust = clamp(item.card.trust + reviewDelta * 0.6, 0, 1);
 
     revenue += itemRevenue;
     refunds += itemRefunds;
+    costOfGoods += itemCost;
     commission += itemCommission;
     logistics += itemLogistics;
     ads += itemAds;
     soldTotal += netSold;
     returnsTotal += returns;
 
+    if (priceFactor === 0) productEvents.push(`🚫 «${product.name}»: цена слишком высокая, прогноз и продажи 0.`);
+    if (item.qty === 0 && interested > sold) productEvents.push(`📉 «${product.name}»: упущено ${interested - sold} продаж из-за пустого склада.`);
     if (netSold > 0) productEvents.push(`${product.emoji} ${product.name}: ${netSold} продаж${returns ? `, возвратов ${returns}` : ""}.`);
     if (item.qty === 0) productEvents.push(`⚠️ «${product.name}» закончился на складе.`);
+    if (priceFactor < 0.35 && priceFactor > 0) saleReasons.push(`${product.name}: высокая цена снизила конверсию.`);
+    if (strategy.id !== "none" && itemAds > itemRevenue * 0.35) saleReasons.push(`${product.name}: реклама дала трафик, но была дорогой.`);
   }
 
-  const profit = revenue - refunds - commission - logistics - ads - operations;
+  const profit = revenue - refunds - costOfGoods - commission - logistics - ads - operations - storageCost;
   state.balance += profit;
   state.totalRevenue += revenue - refunds;
   state.totalProfit += profit;
@@ -1072,29 +1664,161 @@ function simulateDay() {
     returns: returnsTotal,
     revenue,
     refunds,
+    costOfGoods,
     commission,
     logistics,
     ads,
+    storageCost,
     operations,
+    missedSales,
+    reasons: saleReasons,
     profit,
     event: marketEvent.title,
     focus: action.title,
     featured: activeFeatured?.name || null
   };
 
+  evaluateDailyTask(state.lastReport);
   state.day += 1;
   const nextEvent = pickNextMarketEvent(marketEvent.id);
   state.marketEventId = nextEvent.id;
+  updateMarketForNewDay();
+  updateCompetitorsForNewDay();
+  state.actionsUsed = 0;
+  state.dailyTask = createDailyTask(state.day);
   const summary = profit >= 0
     ? `День завершён: прибыль ${money(profit)}, продано ${soldTotal} шт.`
     : `День завершён с убытком ${money(Math.abs(profit))}. Проверьте цену и рекламу.`;
   const tomorrowEvent = `Завтра: ${nextEvent.title}. ${nextEvent.text}`;
   const decisionEvent = `Фокус: ${action.title}${activeFeatured ? `, товар дня: ${activeFeatured.name}` : ""}.`;
   state.events = [summary, tomorrowEvent, decisionEvent, ...productEvents, ...state.events].slice(0, 20);
+  maybeCreateDecisionEvent(state.lastReport);
 
   saveState();
   vibrate(profit >= 0 ? "medium" : "heavy");
   notify(summary);
+  render();
+  if (state.pendingEvent) renderDecisionEventModal();
+}
+
+function maybeCreateDecisionEvent(report) {
+  if (state.pendingEvent || random() > 0.62) return;
+  const candidates = activeStockProducts();
+  const product = candidates[Math.floor(random() * candidates.length)] || PRODUCTS[0];
+  const item = state.inventory[product.id];
+  const market = currentMarket(product);
+  const eventTemplates = [
+    {
+      id: "competitor_cut",
+      title: "Конкурент снизил цену",
+      text: `На рынке «${product.name}» конкурент резко снизил цену. Можно ответить или сохранить маржу.`,
+      options: [
+        { id: "ignore", title: "Игнорировать", cost: 0, risk: "риск упустить часть спроса", effect: () => { market.competitors += 1; } },
+        { id: "match", title: "Снизить цену на 8%", cost: 0, risk: "меньше маржа", effect: () => { item.price = Math.max(1, Math.round(item.price * 0.92 / 10) * 10); } },
+        { id: "card", title: "Усилить карточку", cost: 1200, risk: "расход сейчас", effect: () => { item.card.trust = clamp(item.card.trust + 0.12, 0, 1); } }
+      ]
+    },
+    {
+      id: "negative_review",
+      title: "Резонансный отзыв",
+      text: `Покупатель пожаловался на «${product.name}». Репутация карточки может просесть.`,
+      options: [
+        { id: "refund", title: "Компенсировать", cost: 900, risk: "деньги сейчас", effect: () => { item.card.rating = clamp(item.card.rating + 0.08, 1, 5); state.rating = clamp(state.rating + 0.015, 1, 5); } },
+        { id: "reply", title: "Ответить без компенсации", cost: 0, risk: "не всегда помогает", effect: () => { item.card.trust = clamp(item.card.trust + randomBetween(-0.04, 0.06), 0, 1); } },
+        { id: "ignore", title: "Игнорировать", cost: 0, risk: "рейтинг падает", effect: () => { item.card.rating = clamp(item.card.rating - 0.12, 1, 5); state.rating = clamp(state.rating - 0.025, 1, 5); } }
+      ]
+    },
+    {
+      id: "supplier_deal",
+      title: "Поставщик предлагает скидку",
+      text: `Поставщик готов дать скидку на следующую закупку «${product.name}», но просит предоплату.`,
+      options: [
+        { id: "pay", title: "Внести предоплату", cost: 1400, risk: "заморозка денег", effect: () => { state.suppliers[product.id].cheap.relation = clamp(state.suppliers[product.id].cheap.relation + 0.22, 0, 1); } },
+        { id: "standard", title: "Остаться на стандартных условиях", cost: 0, risk: "без бонусов", effect: () => {} }
+      ]
+    },
+    {
+      id: "blogger",
+      title: "Блогер заметил товар",
+      text: `Небольшой блогер готов упомянуть «${product.name}». Эффект может окупиться, а может нет.`,
+      options: [
+        { id: "buy", title: "Оплатить интеграцию", cost: 2200, risk: "не гарантирует прибыль", effect: () => { market.demand = clamp(market.demand + randomBetween(0.8, 2.4), 1, 12); market.trend = "growing"; } },
+        { id: "skip", title: "Пропустить", cost: 0, risk: "без эффекта", effect: () => {} }
+      ]
+    }
+  ];
+  const event = eventTemplates[Math.floor(random() * eventTemplates.length)];
+  state.pendingEvent = {
+    id: event.id,
+    productId: product.id,
+    title: event.title,
+    text: event.text,
+    options: event.options.map(({ id, title, cost, risk }) => ({ id, title, cost, risk }))
+  };
+}
+
+function renderDecisionEventModal() {
+  const event = state.pendingEvent;
+  if (!event) return;
+  modalContent.innerHTML = `
+    <div class="modal-product">
+      <div class="product-emoji">⚡</div>
+      <div><h2 id="modal-title" style="margin-bottom:3px">${escapeHtml(event.title)}</h2><div class="product-category">Событие дня</div></div>
+    </div>
+    <p style="color:var(--muted);line-height:1.45">${escapeHtml(event.text)}</p>
+    <div class="event-choice-list">
+      ${event.options.map(option => `
+        <button class="event-choice" data-choice="${option.id}" type="button" ${option.cost > state.balance ? "disabled" : ""}>
+          <strong>${escapeHtml(option.title)}</strong>
+          <span>Стоимость: ${money(option.cost)} · ${escapeHtml(option.risk)}</span>
+        </button>
+      `).join("")}
+    </div>
+  `;
+  modalBackdrop.classList.remove("hidden");
+  modalBackdrop.setAttribute("aria-hidden", "false");
+  document.querySelectorAll(".event-choice").forEach(button => button.addEventListener("click", () => applyDecisionEvent(button.dataset.choice)));
+}
+
+function applyDecisionEvent(choiceId) {
+  const event = state.pendingEvent;
+  if (!event) return;
+  const product = productById(event.productId);
+  const item = state.inventory[event.productId];
+  const market = currentMarket(product);
+  const choice = event.options.find(option => option.id === choiceId);
+  if (!choice || choice.cost > state.balance) return;
+  state.balance -= choice.cost;
+
+  if (event.id === "competitor_cut") {
+    if (choiceId === "ignore") market.competitors += 1;
+    if (choiceId === "match") item.price = Math.max(1, Math.round(item.price * 0.92 / 10) * 10);
+    if (choiceId === "card") item.card.trust = clamp(item.card.trust + 0.12, 0, 1);
+  }
+  if (event.id === "negative_review") {
+    if (choiceId === "refund") {
+      item.card.rating = clamp(item.card.rating + 0.08, 1, 5);
+      state.rating = clamp(state.rating + 0.015, 1, 5);
+    }
+    if (choiceId === "reply") item.card.trust = clamp(item.card.trust + randomBetween(-0.04, 0.06), 0, 1);
+    if (choiceId === "ignore") {
+      item.card.rating = clamp(item.card.rating - 0.12, 1, 5);
+      state.rating = clamp(state.rating - 0.025, 1, 5);
+    }
+  }
+  if (event.id === "supplier_deal" && choiceId === "pay") {
+    state.suppliers[product.id].cheap.relation = clamp(state.suppliers[product.id].cheap.relation + 0.22, 0, 1);
+  }
+  if (event.id === "blogger" && choiceId === "buy") {
+    market.demand = clamp(market.demand + randomBetween(0.8, 2.4), 1, 12);
+    market.trend = "growing";
+  }
+
+  state.events.unshift(`Событие «${event.title}»: выбран вариант «${choice.title}».`);
+  state.pendingEvent = null;
+  saveState();
+  closeModal();
+  notify("Решение применено");
   render();
 }
 
