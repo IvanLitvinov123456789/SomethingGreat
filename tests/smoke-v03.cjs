@@ -110,6 +110,12 @@ async function main() {
           state = defaultState();
           state.inventory[product.id] = normalizeInventoryItem(product, { qty: 0, price: product.marketPrice });
           const noStockForecast = salesForecast(product).max;
+          state.balance = 999999;
+          hireStaff("analyst");
+          toggleAutomation("autoPrice");
+          const staffWorks = Boolean(state.staff.analyst && state.automations.autoPrice && actionLimit() > ECONOMY.baseActionLimit);
+          activeTab = "home";
+          render();
 
           return {
             title: document.title,
@@ -120,6 +126,8 @@ async function main() {
             migrationOk,
             noStockForecast,
             hasFocusCards: document.querySelectorAll(".focus-card").length,
+            navItems: document.querySelectorAll(".nav-item").length,
+            staffWorks,
             hasSupplierState: Boolean(state.suppliers[product.id].cheap),
             docScrollWidth: document.documentElement.scrollWidth,
             innerWidth: window.innerWidth
@@ -136,6 +144,8 @@ async function main() {
       ["migration", value.migrationOk],
       ["no stock", value.noStockForecast === 0],
       ["focus UI", value.hasFocusCards >= 4],
+      ["new nav", value.navItems >= 8],
+      ["staff automation", value.staffWorks],
       ["supplier state", value.hasSupplierState]
     ];
     const failed = checks.filter(([, ok]) => !ok);

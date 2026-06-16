@@ -27,6 +27,9 @@ Marketplace Empire — MVP Telegram Mini App.
 - улучшения карточек товаров;
 - случайные события с выбором реакции;
 - версия сохранения и миграция старых localStorage-сейвов;
+- отдельные экраны: склад, аналитика, развитие и задания;
+- сотрудники с зарплатой и игровыми эффектами;
+- автоматизация цены, автозаказа и остановки невыгодной рекламы;
 - сохранение прогресса в localStorage;
 - адаптация под тему Telegram;
 - запуск как обычный сайт или Telegram Mini App.
@@ -77,7 +80,7 @@ python bot.py
 ```powershell
 node --check app.js
 python -m py_compile bot.py
-node tests\smoke-v02.cjs
+node tests\smoke-v03.cjs
 ```
 
 ## Важно для следующей версии

@@ -224,6 +224,87 @@ const UPGRADE_DEFS = [
   }
 ];
 
+const STAFF_DEFS = [
+  {
+    id: "analyst",
+    emoji: "🧠",
+    title: "Аналитик",
+    hireCost: 11000,
+    salary: 520,
+    text: "Даёт дополнительное очко управления и точнее прогнозирует спрос.",
+    effect: "+1 очко управления"
+  },
+  {
+    id: "buyer",
+    emoji: "🤝",
+    title: "Закупщик",
+    hireCost: 9000,
+    salary: 430,
+    text: "Улучшает отношения с поставщиками и снижает цену закупки.",
+    effect: "−3% к закупке"
+  },
+  {
+    id: "ads",
+    emoji: "📣",
+    title: "Рекламщик",
+    hireCost: 9500,
+    salary: 480,
+    text: "Повышает эффективность рекламных стратегий.",
+    effect: "+12% к рекламе"
+  },
+  {
+    id: "support",
+    emoji: "🛡️",
+    title: "Поддержка",
+    hireCost: 8200,
+    salary: 410,
+    text: "Снижает ущерб от отзывов и возвратов.",
+    effect: "−10% возвратов"
+  },
+  {
+    id: "warehouse",
+    emoji: "🏬",
+    title: "Складской управляющий",
+    hireCost: 10500,
+    salary: 460,
+    text: "Уменьшает хранение и помогает с переполнением склада.",
+    effect: "−15% хранения"
+  },
+  {
+    id: "content",
+    emoji: "🖼️",
+    title: "Менеджер карточек",
+    hireCost: 7800,
+    salary: 390,
+    text: "Дешевле улучшает карточки и повышает доверие покупателей.",
+    effect: "−12% к улучшениям"
+  }
+];
+
+const AUTOMATION_DEFS = [
+  {
+    id: "autoPrice",
+    emoji: "🏷️",
+    title: "Цена −5% к рынку",
+    text: "Перед днём держит цены активных товаров примерно на 5% ниже рынка.",
+    requires: "analyst"
+  },
+  {
+    id: "autoRestock",
+    emoji: "📦",
+    title: "Автозаказ остатков",
+    text: "Если товара меньше 5 шт., закупщик заказывает минимальную стандартную партию.",
+    requires: "buyer"
+  },
+  {
+    id: "autoStopAds",
+    emoji: "🧯",
+    title: "Стоп дорогой рекламы",
+    text: "Отключает рекламу у товаров с нулевым прогнозом спроса.",
+    requires: "ads"
+  }
+];
+
 const GOALS = [
   {
     id: "first_orders",
@@ -282,6 +363,8 @@ const defaultState = () => ({
   market: initialMarketState(),
   competitors: initialCompetitorState(),
   upgrades: {},
+  staff: {},
+  automations: {},
   claimedGoals: [],
   dailyAction: "pricing",
   featuredProductId: null,
@@ -353,11 +436,13 @@ function migrateState(saved) {
     market: mergeDeep(base.market, saved.market || {}),
     competitors: mergeDeep(base.competitors, saved.competitors || {}),
     upgrades: saved.upgrades || {},
+    staff: saved.staff || {},
+    automations: saved.automations || {},
     claimedGoals: Array.isArray(saved.claimedGoals) ? saved.claimedGoals : [],
     dailyAction: DAILY_ACTIONS.some(action => action.id === saved.dailyAction) ? saved.dailyAction : "pricing",
     featuredProductId: productById(saved.featuredProductId) ? saved.featuredProductId : null,
     marketEventId: MARKET_EVENTS.some(event => event.id === saved.marketEventId) ? saved.marketEventId : "steady",
-    actionsUsed: clamp(Number(saved.actionsUsed || 0), 0, actionLimit(saved.upgrades || {})),
+    actionsUsed: clamp(Number(saved.actionsUsed || 0), 0, actionLimit(saved.upgrades || {}, saved.staff || {})),
     dailyTask: saved.dailyTask || createDailyTask(base.day),
     financeHistory: Array.isArray(saved.financeHistory) ? saved.financeHistory.slice(-14) : [],
     marketHistory: Array.isArray(saved.marketHistory) ? saved.marketHistory.slice(-14) : [],
@@ -455,8 +540,8 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function actionLimit(upgrades = state?.upgrades || {}) {
-  return ECONOMY.baseActionLimit + Math.floor(Number(upgrades.analytics || 0) / 2);
+function actionLimit(upgrades = state?.upgrades || {}, staff = state?.staff || {}) {
+  return ECONOMY.baseActionLimit + Math.floor(Number(upgrades.analytics || 0) / 2) + (staff.analyst ? 1 : 0);
 }
 
 function actionsLeft() {
@@ -494,6 +579,18 @@ function currentMarket(productOrId) {
   return state?.market?.[product.id] || initialMarketState()[product.id];
 }
 
+function staffHired(id) {
+  return Boolean(state?.staff?.[id]);
+}
+
+function staffSalaryTotal() {
+  return STAFF_DEFS.reduce((sum, staff) => sum + (staffHired(staff.id) ? staff.salary : 0), 0);
+}
+
+function automationEnabled(id) {
+  return Boolean(state?.automations?.[id]);
+}
+
 function supplierById(id) {
   return SUPPLIERS.find(supplier => supplier.id === id) || SUPPLIERS[1];
 }
@@ -510,6 +607,12 @@ function random() {
 
 function randomBetween(min, max) {
   return min + random() * (max - min);
+}
+
+function avg(values) {
+  const list = values.filter(value => Number.isFinite(value));
+  if (!list.length) return 0;
+  return list.reduce((sum, value) => sum + value, 0) / list.length;
 }
 
 function vibrate(type = "light") {
@@ -558,7 +661,8 @@ function purchaseCost(product, supplierId = null) {
   const relation = state.suppliers?.[product.id]?.[supplier.id]?.relation || 0;
   const actionDiscount = action.purchaseDiscount || 0;
   const relationDiscount = clamp(relation * 0.08, 0, 0.12);
-  return Math.max(1, Math.round(product.cost * supplier.priceFactor * (1 - actionDiscount - relationDiscount)));
+  const staffDiscount = staffHired("buyer") ? 0.03 : 0;
+  return Math.max(1, Math.round(product.cost * supplier.priceFactor * (1 - actionDiscount - relationDiscount - staffDiscount)));
 }
 
 function inventoryValue() {
@@ -620,7 +724,7 @@ function effectiveReturnRate(product) {
   const item = state.inventory[product.id];
   const supplier = supplierById(item?.supplierId || "standard");
   const cardReduction = (item?.card?.upgrades?.length || 0) * 0.018;
-  const serviceReduction = 1 - upgradeLevel("logistics") * 0.035 - upgradeLevel("brand") * 0.015;
+  const serviceReduction = 1 - upgradeLevel("logistics") * 0.035 - upgradeLevel("brand") * 0.015 - (staffHired("support") ? 0.1 : 0);
   const supplierRisk = 1 + (1 - supplier.quality) * 1.25 + supplier.defectRate * 1.5;
   return clamp(product.returnRate * (event.returnMultiplier || 1) * serviceReduction * supplierRisk * (1 - cardReduction), 0.005, 0.32);
 }
@@ -631,7 +735,7 @@ function productDemandMultiplier(product) {
   const categoryBoost = event.categoryBoosts?.[product.category] || 1;
   const brandBoost = 1 + upgradeLevel("brand") * 0.025;
   const analyticsBoost = 1 + upgradeLevel("analytics") * 0.035;
-  const cardBoost = 1 + (item?.card?.upgrades?.length || 0) * 0.08 + (item?.card?.trust || 0) * 0.12;
+  const cardBoost = 1 + (item?.card?.upgrades?.length || 0) * 0.08 + (item?.card?.trust || 0) * 0.12 + (staffHired("content") ? 0.04 : 0);
   const actionBoost = currentDailyAction().demandMultiplier || 1;
   const featuredBoost = state.featuredProductId === product.id ? 1.34 : 1;
   return (event.demandMultiplier || 1) * categoryBoost * brandBoost * analyticsBoost * cardBoost * actionBoost * featuredBoost;
@@ -809,7 +913,8 @@ function receiveDueShipments() {
 
 function holdingCost() {
   const discount = 1 - upgradeLevel("warehouse") * 0.06;
-  return Math.round(storageUsed(false) * ECONOMY.storageCostPerUnit * Math.max(0.55, discount));
+  const staffDiscount = staffHired("warehouse") ? 0.15 : 0;
+  return Math.round(storageUsed(false) * ECONOMY.storageCostPerUnit * Math.max(0.45, discount - staffDiscount));
 }
 
 function activeStockProducts() {
@@ -823,6 +928,54 @@ function cardUpgradeBoost(item) {
 function nextCardUpgrade(item) {
   const owned = new Set(item?.card?.upgrades || []);
   return CARD_UPGRADES.find(upgrade => !owned.has(upgrade.id)) || null;
+}
+
+function cardUpgradeCost(upgrade) {
+  return Math.round(upgrade.cost * (staffHired("content") ? 0.88 : 1));
+}
+
+function applyAutomations() {
+  const notes = [];
+
+  if (automationEnabled("autoPrice") && staffHired("analyst")) {
+    for (const product of activeStockProducts()) {
+      const item = state.inventory[product.id];
+      const target = Math.round(currentMarket(product).price * 0.95 / ECONOMY.salePriceStep) * ECONOMY.salePriceStep;
+      if (Math.abs(item.price - target) >= ECONOMY.salePriceStep) {
+        item.price = Math.max(1, target);
+        notes.push(`Автоцена: «${product.name}» выставлен на ${money(item.price)}.`);
+      }
+    }
+  }
+
+  if (automationEnabled("autoStopAds") && staffHired("ads")) {
+    for (const product of activeStockProducts()) {
+      const item = state.inventory[product.id];
+      if ((item.adStrategy || "none") !== "none" && salesForecast(product, item).max === 0) {
+        item.adStrategy = "none";
+        item.adActive = false;
+        notes.push(`Автостоп рекламы: «${product.name}» имеет нулевой спрос.`);
+      }
+    }
+  }
+
+  if (automationEnabled("autoRestock") && staffHired("buyer")) {
+    for (const product of ownedProducts()) {
+      const item = state.inventory[product.id];
+      const incoming = state.shipments.filter(shipment => shipment.productId === product.id).reduce((sum, shipment) => sum + shipment.qty, 0);
+      if ((item.qty + incoming) >= 5) continue;
+      const supplier = supplierById("standard");
+      const qty = supplier.minQty;
+      const cost = purchaseCost(product, supplier.id) * qty;
+      const reservedVolume = storageUsed(true) + qty * product.volume;
+      if (state.balance < cost || reservedVolume > warehouseCapacity()) continue;
+      state.balance -= cost;
+      state.shipments.push({ id: `${Date.now()}-${random().toString(36).slice(2)}`, productId: product.id, qty, supplierId: supplier.id, cost, orderDay: state.day, arrivalDay: state.day + supplier.delay });
+      notes.push(`Автозаказ: «${product.name}» ${qty} шт., прибытие день ${state.day + supplier.delay}.`);
+    }
+  }
+
+  if (notes.length) state.events = [...notes, ...state.events].slice(0, 20);
 }
 
 function goalValue(goal) {
@@ -847,12 +1000,25 @@ function render() {
     button.classList.toggle("active", button.dataset.tab === activeTab);
   });
 
-  const titles = { home: "Главная", market: "Рынок", stock: "Мои товары", profile: "Статистика" };
+  const titles = {
+    home: "Главная",
+    market: "Рынок",
+    stock: "Мои товары",
+    warehouse: "Склад",
+    analytics: "Аналитика",
+    development: "Развитие",
+    tasks: "Задания",
+    profile: "Статистика"
+  };
   pageTitle.textContent = titles[activeTab];
 
   if (activeTab === "home") renderHome();
   if (activeTab === "market") renderMarket();
   if (activeTab === "stock") renderStock();
+  if (activeTab === "warehouse") renderWarehouse();
+  if (activeTab === "analytics") renderAnalytics();
+  if (activeTab === "development") renderDevelopment();
+  if (activeTab === "tasks") renderTasks();
   if (activeTab === "profile") renderProfile();
 }
 
@@ -965,8 +1131,6 @@ function renderHome() {
       </article>
     </section>
 
-    ${renderGoalsSection()}
-
     <section class="section">
       <div class="metrics-grid">
         <article class="metric-card"><div class="metric-label">Общие продажи</div><div class="metric-value">${state.totalOrders}</div></article>
@@ -989,6 +1153,7 @@ function renderHome() {
           <div class="report-row"><span>Логистика</span><strong>−${money(report.logistics)}</strong></div>
           <div class="report-row"><span>Реклама</span><strong>−${money(report.ads)}</strong></div>
           <div class="report-row"><span>Хранение</span><strong>−${money(report.storageCost || 0)}</strong></div>
+          ${report.salaries ? `<div class="report-row"><span>Сотрудники</span><strong>−${money(report.salaries)}</strong></div>` : ""}
           <div class="report-row"><span>Упущенные продажи</span><strong>${report.missedSales || 0}</strong></div>
           ${report.operations ? `<div class="report-row"><span>Фокус и витрина</span><strong>−${money(report.operations)}</strong></div>` : ""}
           <div class="report-row total"><span>Прибыль дня</span><strong class="${report.profit >= 0 ? "positive" : "negative"}">${money(report.profit)}</strong></div>
@@ -1185,7 +1350,7 @@ function renderStock() {
               <span>Улучшения: ${item.card.upgrades.length ? item.card.upgrades.map(id => CARD_UPGRADES.find(upgrade => upgrade.id === id)?.title).filter(Boolean).join(", ") : "нет"}</span>
             </div>
             <button class="secondary-btn improve-card-btn" data-id="${product.id}" type="button" ${nextUpgrade ? "" : "disabled"}>
-              ${nextUpgrade ? `Улучшить: ${nextUpgrade.title} (${money(nextUpgrade.cost)})` : "Карточка улучшена полностью"}
+              ${nextUpgrade ? `Улучшить: ${nextUpgrade.title} (${money(cardUpgradeCost(nextUpgrade))})` : "Карточка улучшена полностью"}
             </button>
             <button class="secondary-btn feature-btn" data-id="${product.id}" type="button">
               ${isFeatured ? "Убрать с витрины дня" : `Сделать товаром дня (${money(FEATURED_PRODUCT_COST)}/день)`}
@@ -1206,6 +1371,155 @@ function renderStock() {
   document.querySelectorAll(".feature-btn").forEach(button => button.addEventListener("click", () => toggleFeaturedProduct(button.dataset.id)));
   document.querySelectorAll(".stop-sale-btn").forEach(button => button.addEventListener("click", () => toggleSaleStopped(button.dataset.id)));
   document.querySelectorAll(".restock-btn").forEach(button => button.addEventListener("click", () => openPurchase(button.dataset.id)));
+}
+
+function renderWarehouse() {
+  const used = storageUsed(true);
+  const capacity = warehouseCapacity();
+  const fillPercent = clamp(used / capacity * 100, 0, 120);
+  const damagedTotal = Object.values(state.inventory).reduce((sum, item) => sum + (item.damaged || 0), 0);
+
+  view.innerHTML = `
+    <section class="card">
+      <div class="section-heading">
+        <h2>Склад и поставки</h2>
+        <span class="section-note">${used}/${capacity} складских ед.</span>
+      </div>
+      <div class="progress"><div style="width:${Math.min(fillPercent, 100)}%"></div></div>
+      <div class="tags">
+        <span class="tag ${fillPercent > 90 ? "bad" : "good"}">Заполненность ${Math.round(fillPercent)}%</span>
+        <span class="tag">Хранение ${money(holdingCost())}/день</span>
+        <span class="tag ${damagedTotal ? "bad" : ""}">Брак ${damagedTotal} шт.</span>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-heading"><h2>Поставки в пути</h2><span class="section-note">${state.shipments.length} активных</span></div>
+      ${state.shipments.length ? state.shipments.map(shipment => {
+        const product = productById(shipment.productId);
+        const supplier = supplierById(shipment.supplierId);
+        return `
+          <article class="card compact-card">
+            <div class="card-top">
+              <div class="product-main">
+                <div class="product-emoji">${product?.emoji || "📦"}</div>
+                <div><h3 class="product-title">${escapeHtml(product?.name || "Товар")}</h3><div class="product-category">${escapeHtml(supplier.title)} · прибытие день ${shipment.arrivalDay}</div></div>
+              </div>
+              <div class="price">${shipment.qty} шт.</div>
+            </div>
+          </article>
+        `;
+      }).join("") : `<div class="empty-state"><div class="empty-icon">🚚</div><h2>Поставок нет</h2><p>Закажите товар на вкладке «Рынок» или включите автозаказ.</p></div>`}
+    </section>
+
+    <section class="section">
+      <div class="section-heading"><h2>Остатки</h2><span class="section-note">Включая брак и остановленные товары</span></div>
+      ${ownedProducts().length ? ownedProducts().map(product => {
+        const item = state.inventory[product.id];
+        return `
+          <article class="card compact-card">
+            <div class="card-top">
+              <div class="product-main">
+                <div class="product-emoji">${product.emoji}</div>
+                <div><h3 class="product-title">${escapeHtml(product.name)}</h3><div class="product-category">${item.stopped ? "Продажи остановлены" : "В продаже"} · объём ${product.volume} ед./шт.</div></div>
+              </div>
+              <div class="price">${item.qty} шт.</div>
+            </div>
+            <div class="tags">
+              <span class="tag">Занято ${item.qty * product.volume} ед.</span>
+              <span class="tag ${item.damaged ? "bad" : ""}">Брак ${item.damaged || 0}</span>
+              <span class="tag">Возраст ${item.age || 0} дн.</span>
+            </div>
+            ${(item.damaged || 0) > 0 ? `
+              <div class="product-actions">
+                <button class="secondary-btn damaged-action" data-id="${product.id}" data-action="discount" type="button">Продать с уценкой</button>
+                <button class="secondary-btn damaged-action" data-id="${product.id}" data-action="writeoff" type="button">Списать</button>
+              </div>
+            ` : ""}
+          </article>
+        `;
+      }).join("") : `<div class="empty-state"><div class="empty-icon">📭</div><h2>Склад пуст</h2><p>Сначала закупите товар.</p></div>`}
+    </section>
+  `;
+
+  document.querySelectorAll(".damaged-action").forEach(button => button.addEventListener("click", () => handleDamagedGoods(button.dataset.id, button.dataset.action)));
+}
+
+function renderAnalytics() {
+  const history = state.financeHistory.slice(0, 7).reverse();
+  const topMarkets = PRODUCTS
+    .map(product => ({ product, market: currentMarket(product), forecast: salesForecast(product) }))
+    .sort((a, b) => b.market.demand - a.market.demand)
+    .slice(0, 5);
+  const latestProfit = state.financeHistory[0]?.profit || 0;
+
+  view.innerHTML = `
+    <section class="card">
+      <div class="section-heading">
+        <h2>Аналитика</h2>
+        <span class="section-note">Последние ${history.length || 0} дней</span>
+      </div>
+      <div class="metrics-grid">
+        <article class="metric-card"><div class="metric-label">Последняя прибыль</div><div class="metric-value ${latestProfit >= 0 ? "positive" : "negative"}">${money(latestProfit)}</div></article>
+        <article class="metric-card"><div class="metric-label">Средняя прибыль</div><div class="metric-value">${money(avg(history.map(item => item.profit)))}</div></article>
+        <article class="metric-card"><div class="metric-label">Средние продажи</div><div class="metric-value">${avg(history.map(item => item.sold)).toFixed(1)}</div></article>
+        <article class="metric-card"><div class="metric-label">Рейтинг</div><div class="metric-value">${state.rating.toFixed(2)}</div></article>
+      </div>
+      <div class="bar-chart">
+        ${history.map(item => `<span class="${item.profit >= 0 ? "positive" : "negative"}" style="height:${clamp(Math.abs(item.profit) / 900, 8, 58)}px" title="День ${item.day}: ${money(item.profit)}"></span>`).join("")}
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-heading"><h2>Рынки</h2><span class="section-note">Спрос, тренд и прогноз</span></div>
+      ${topMarkets.map(({ product, market, forecast }) => `
+        <article class="card compact-card">
+          <div class="card-top">
+            <div class="product-main">
+              <div class="product-emoji">${product.emoji}</div>
+              <div><h3 class="product-title">${escapeHtml(product.name)}</h3><div class="product-category">${trendLabel(market.trend)} · конкуренты ${market.competitors}</div></div>
+            </div>
+            <div class="price">${money(market.price)}</div>
+          </div>
+          <div class="tags">
+            <span class="tag">Спрос ${market.demand.toFixed(1)}/12</span>
+            <span class="tag">Прогноз ${forecast.min}-${forecast.max} шт.</span>
+            <span class="tag">Насыщение ${Math.round(market.saturation * 100)}%</span>
+          </div>
+        </article>
+      `).join("")}
+    </section>
+  `;
+}
+
+function renderDevelopment() {
+  view.innerHTML = `
+    ${renderUpgradesSection()}
+    ${renderStaffSection()}
+    ${renderAutomationSection()}
+  `;
+
+  document.querySelectorAll(".buy-upgrade").forEach(button => button.addEventListener("click", () => buyUpgrade(button.dataset.id)));
+  document.querySelectorAll(".hire-staff").forEach(button => button.addEventListener("click", () => hireStaff(button.dataset.id)));
+  document.querySelectorAll(".automation-toggle").forEach(button => button.addEventListener("click", () => toggleAutomation(button.dataset.id)));
+}
+
+function renderTasks() {
+  const task = state.dailyTask || createDailyTask();
+  view.innerHTML = `
+    <section class="card">
+      <div class="section-heading">
+        <h2>Задача дня</h2>
+        <span class="section-note">${task.claimed ? "Выполнена" : "Активна"}</span>
+      </div>
+      <h3>${escapeHtml(task.title)}</h3>
+      <p style="color:var(--muted);margin-bottom:12px">Награда ${money(task.reward)}. Задача проверяется после завершения дня.</p>
+      <span class="tag ${task.claimed ? "good" : ""}">${task.claimed ? "Награда получена" : "В работе"}</span>
+    </section>
+    ${renderGoalsSection()}
+  `;
+
+  document.querySelectorAll(".claim-goal").forEach(button => button.addEventListener("click", () => claimGoal(button.dataset.id)));
 }
 
 function renderProfile() {
@@ -1236,14 +1550,13 @@ function renderProfile() {
       </div>
     </section>
 
-    ${renderUpgradesSection()}
-
     <section class="section">
       <article class="card report-list">
         <div class="report-row"><span>Денег на балансе</span><strong>${money(state.balance)}</strong></div>
         <div class="report-row"><span>Стоимость остатков</span><strong>${money(inventoryValue())}</strong></div>
         <div class="report-row"><span>Продано товаров</span><strong>${state.totalOrders}</strong></div>
         <div class="report-row"><span>Чистая прибыль</span><strong class="${state.totalProfit >= 0 ? "positive" : "negative"}">${money(state.totalProfit)}</strong></div>
+        <div class="report-row"><span>Версия сохранения</span><strong>v${state.saveVersion}</strong></div>
       </article>
     </section>
 
@@ -1253,7 +1566,6 @@ function renderProfile() {
   `;
 
   document.getElementById("reset-game").addEventListener("click", resetGame);
-  document.querySelectorAll(".buy-upgrade").forEach(button => button.addEventListener("click", () => buyUpgrade(button.dataset.id)));
 }
 
 function renderUpgradesSection() {
@@ -1284,6 +1596,72 @@ function renderUpgradesSection() {
               <div class="progress"><div style="width:${level / MAX_UPGRADE_LEVEL * 100}%"></div></div>
               <button class="secondary-btn buy-upgrade" data-id="${upgrade.id}" type="button" ${canBuy ? "" : "disabled"}>
                 ${maxed ? "Максимум" : `Улучшить за ${money(cost)}`}
+              </button>
+            </article>
+          `;
+        }).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderStaffSection() {
+  return `
+    <section class="section">
+      <div class="section-heading">
+        <h2>Сотрудники</h2>
+        <span class="section-note">Зарплаты: ${money(staffSalaryTotal())}/день</span>
+      </div>
+      <div class="upgrade-grid">
+        ${STAFF_DEFS.map(staff => {
+          const hired = staffHired(staff.id);
+          const canHire = state.balance >= staff.hireCost && !hired;
+          return `
+            <article class="upgrade-card">
+              <div class="upgrade-top">
+                <div class="upgrade-icon">${staff.emoji}</div>
+                <div>
+                  <h3>${escapeHtml(staff.title)}</h3>
+                  <div class="upgrade-level">${hired ? "В команде" : `Найм ${money(staff.hireCost)}`}</div>
+                </div>
+              </div>
+              <p>${escapeHtml(staff.text)}</p>
+              <div class="upgrade-effect">${escapeHtml(staff.effect)} · зарплата ${money(staff.salary)}/день</div>
+              <button class="secondary-btn hire-staff" data-id="${staff.id}" type="button" ${canHire ? "" : "disabled"}>
+                ${hired ? "Нанят" : "Нанять"}
+              </button>
+            </article>
+          `;
+        }).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderAutomationSection() {
+  return `
+    <section class="section">
+      <div class="section-heading">
+        <h2>Автоматизация</h2>
+        <span class="section-note">Работает перед расчётом дня</span>
+      </div>
+      <div class="upgrade-grid">
+        ${AUTOMATION_DEFS.map(rule => {
+          const unlocked = staffHired(rule.requires);
+          const enabled = automationEnabled(rule.id);
+          const staff = STAFF_DEFS.find(item => item.id === rule.requires);
+          return `
+            <article class="upgrade-card">
+              <div class="upgrade-top">
+                <div class="upgrade-icon">${rule.emoji}</div>
+                <div>
+                  <h3>${escapeHtml(rule.title)}</h3>
+                  <div class="upgrade-level">${unlocked ? "Доступно" : `Нужен: ${staff?.title || "сотрудник"}`}</div>
+                </div>
+              </div>
+              <p>${escapeHtml(rule.text)}</p>
+              <button class="secondary-btn automation-toggle" data-id="${rule.id}" type="button" ${unlocked ? "" : "disabled"}>
+                ${enabled ? "Выключить" : "Включить"}
               </button>
             </article>
           `;
@@ -1472,12 +1850,13 @@ function improveCard(productId) {
     notify("Карточка уже полностью улучшена");
     return;
   }
-  if (state.balance < upgrade.cost) {
+  const cost = cardUpgradeCost(upgrade);
+  if (state.balance < cost) {
     notify("Не хватает денег на улучшение карточки");
     return;
   }
   if (!spendActionPoint("улучшить карточку")) return;
-  state.balance -= upgrade.cost;
+  state.balance -= cost;
   item.card.upgrades.push(upgrade.id);
   item.card.level = item.card.upgrades.length;
   item.card.trust = clamp(item.card.trust + 0.07, 0, 1);
@@ -1536,7 +1915,58 @@ function buyUpgrade(upgradeId) {
   saveState();
   vibrate("medium");
   notify(`${upgrade.title}: уровень ${level + 1}`);
-  renderProfile();
+  render();
+}
+
+function hireStaff(staffId) {
+  const staff = STAFF_DEFS.find(item => item.id === staffId);
+  if (!staff || staffHired(staff.id)) return;
+  if (state.balance < staff.hireCost) {
+    notify("Не хватает денег на найм");
+    return;
+  }
+  state.balance -= staff.hireCost;
+  state.staff[staff.id] = { hiredDay: state.day };
+  state.events.unshift(`Нанят сотрудник: ${staff.title}.`);
+  saveState();
+  vibrate("medium");
+  notify(`Нанят: ${staff.title}`);
+  renderDevelopment();
+}
+
+function toggleAutomation(ruleId) {
+  const rule = AUTOMATION_DEFS.find(item => item.id === ruleId);
+  if (!rule || !staffHired(rule.requires)) return;
+  state.automations[rule.id] = !state.automations[rule.id];
+  state.events.unshift(`${state.automations[rule.id] ? "Включена" : "Выключена"} автоматизация: ${rule.title}.`);
+  saveState();
+  vibrate("light");
+  renderDevelopment();
+}
+
+function handleDamagedGoods(productId, action) {
+  const product = productById(productId);
+  const item = state.inventory[productId];
+  if (!product || !item || !item.damaged) return;
+  const qty = item.damaged;
+  if (action === "discount") {
+    const revenue = Math.round(qty * currentMarket(product).price * 0.42);
+    state.balance += revenue;
+    item.damaged = 0;
+    state.events.unshift(`Брак «${product.name}» продан с уценкой за ${money(revenue)}.`);
+  }
+  if (action === "writeoff") {
+    const cost = Math.round(qty * 25);
+    if (state.balance < cost) {
+      notify("Не хватает денег на списание");
+      return;
+    }
+    state.balance -= cost;
+    item.damaged = 0;
+    state.events.unshift(`Брак «${product.name}» списан. Расход ${money(cost)}.`);
+  }
+  saveState();
+  renderWarehouse();
 }
 
 function estimateReturns(sold, returnRate) {
@@ -1549,6 +1979,7 @@ function estimateReturns(sold, returnRate) {
 }
 
 function simulateDay() {
+  applyAutomations();
   receiveDueShipments();
   const products = activeStockProducts();
   if (products.length === 0) {
@@ -1564,10 +1995,11 @@ function simulateDay() {
   const activeFeatured = state.featuredProductId && state.inventory[state.featuredProductId]?.qty > 0
     ? productById(state.featuredProductId)
     : null;
-  const marketingBoost = 1 + upgradeLevel("marketing") * 0.1;
+  const marketingBoost = 1 + upgradeLevel("marketing") * 0.1 + (staffHired("ads") ? 0.12 : 0);
   const priceSensitivity = (marketEvent.priceSensitivity || 1) * (action.priceSensitivityMultiplier || 1);
   const operations = action.cost + (activeFeatured ? FEATURED_PRODUCT_COST : 0);
   const storageCost = holdingCost();
+  const salaries = staffSalaryTotal();
   let revenue = 0;
   let refunds = 0;
   let costOfGoods = 0;
@@ -1643,7 +2075,7 @@ function simulateDay() {
     if (strategy.id !== "none" && itemAds > itemRevenue * 0.35) saleReasons.push(`${product.name}: реклама дала трафик, но была дорогой.`);
   }
 
-  const profit = revenue - refunds - costOfGoods - commission - logistics - ads - operations - storageCost;
+  const profit = revenue - refunds - costOfGoods - commission - logistics - ads - operations - storageCost - salaries;
   state.balance += profit;
   state.totalRevenue += revenue - refunds;
   state.totalProfit += profit;
@@ -1669,6 +2101,7 @@ function simulateDay() {
     logistics,
     ads,
     storageCost,
+    salaries,
     operations,
     missedSales,
     reasons: saleReasons,
@@ -1679,6 +2112,15 @@ function simulateDay() {
   };
 
   evaluateDailyTask(state.lastReport);
+  state.financeHistory = [{
+    day: state.day,
+    revenue: revenue - refunds,
+    profit,
+    sold: soldTotal,
+    ads,
+    storageCost,
+    rating: state.rating
+  }, ...state.financeHistory].slice(0, 14);
   state.day += 1;
   const nextEvent = pickNextMarketEvent(marketEvent.id);
   state.marketEventId = nextEvent.id;
