@@ -2,7 +2,14 @@
 
 const GAME_TITLE = "Marketplace Empire";
 const STORAGE_KEY = "market_boss_mvp_v1";
-const SAVE_VERSION = 2;
+const SAVE_VERSION = 3;
+const CITY = window.ME_CITY;
+const CITY_CONFIG = CITY.CONFIG;
+const DISTRICTS = CITY.DISTRICTS;
+const DISTRICT_BY_ID = CITY.DISTRICT_BY_ID;
+const CITY_OWNERS = CITY.OWNERS;
+const CITY_COMPETITORS = CITY.COMPETITORS;
+const PLAYER_OWNER = "player";
 const ECONOMY = {
   startingBalance: 50000,
   commissionRate: 0.15,
@@ -357,6 +364,9 @@ const defaultState = () => ({
   totalRevenue: 0,
   totalProfit: 0,
   totalOrders: 0,
+  city: CITY.initialCityState(),
+  districts: CITY.initialDistrictState(),
+  cityCompetitors: CITY.initialCompetitorCompanies(),
   inventory: {},
   shipments: [],
   suppliers: initialSupplierState(),
@@ -373,6 +383,7 @@ const defaultState = () => ({
   dailyTask: null,
   financeHistory: [],
   marketHistory: [],
+  districtShareHistory: [],
   pendingEvent: null,
   tutorial: { done: false, skipped: false, step: 0 },
   rngSeed: Math.max(1, Date.now() % ECONOMY.rngModulus),
@@ -430,6 +441,9 @@ function migrateState(saved) {
     ...base,
     ...saved,
     saveVersion: SAVE_VERSION,
+    city: migrateCityState(saved.city || {}, saved, base.city),
+    districts: migrateDistrictState(saved.districts || {}, base.districts),
+    cityCompetitors: mergeDeep(base.cityCompetitors, saved.cityCompetitors || {}),
     inventory: migratedInventory,
     shipments: Array.isArray(saved.shipments) ? saved.shipments.filter(item => productById(item.productId)) : [],
     suppliers: mergeDeep(base.suppliers, saved.suppliers || {}),
@@ -446,6 +460,7 @@ function migrateState(saved) {
     dailyTask: saved.dailyTask || createDailyTask(base.day),
     financeHistory: Array.isArray(saved.financeHistory) ? saved.financeHistory.slice(-14) : [],
     marketHistory: Array.isArray(saved.marketHistory) ? saved.marketHistory.slice(-14) : [],
+    districtShareHistory: Array.isArray(saved.districtShareHistory) ? saved.districtShareHistory.slice(-20) : [],
     pendingEvent: saved.pendingEvent || null,
     tutorial: { ...base.tutorial, ...(saved.tutorial || {}) },
     rngSeed: Number.isFinite(saved.rngSeed) && saved.rngSeed > 0 ? saved.rngSeed : base.rngSeed
@@ -475,6 +490,106 @@ function normalizeInventoryItem(product, item = {}) {
     age: Math.max(0, Math.floor(Number(item.age || 0))),
     damaged: Math.max(0, Math.floor(Number(item.damaged || 0)))
   };
+}
+
+function migrateCityState(savedCity = {}, saved = {}, baseCity = CITY.initialCityState()) {
+  const hasOldSave = Boolean(saved.saveVersion || saved.day > 1 || saved.inventory);
+  const storeName = sanitizeStoreName(savedCity.storeName || saved.storeName || (hasOldSave ? "MarketFox" : ""));
+  const brandColor = CITY_CONFIG.brandColors.includes(savedCity.brandColor) ? savedCity.brandColor : baseCity.brandColor;
+  const selectedDistrictId = DISTRICT_BY_ID[savedCity.selectedDistrictId] ? savedCity.selectedDistrictId : "south";
+  const mechanics = { ...baseCity.unlockedMechanics, ...(savedCity.unlockedMechanics || {}) };
+
+  return {
+    ...baseCity,
+    ...savedCity,
+    storeName,
+    brandColor,
+    onboardingDone: Boolean(savedCity.onboardingDone || (hasOldSave && storeName)),
+    mapMode: savedCity.mapMode === "district" ? "district" : "city",
+    selectedDistrictId,
+    builtCityWarehouse: Boolean(savedCity.builtCityWarehouse),
+    pendingDistrictAdSpend: Math.max(0, Number(savedCity.pendingDistrictAdSpend || 0)),
+    tipsSeen: savedCity.tipsSeen && typeof savedCity.tipsSeen === "object" ? savedCity.tipsSeen : {},
+    unlockedMechanics: mechanics
+  };
+}
+
+function migrateDistrictState(savedDistricts = {}, baseDistricts = CITY.initialDistrictState()) {
+  return Object.fromEntries(DISTRICTS.map(districtDef => {
+    const base = baseDistricts[districtDef.id];
+    const saved = savedDistricts[districtDef.id] || {};
+    const pickupPoints = mergePickupPoints(base.pickupPoints, saved.pickupPoints);
+    const shares = normalizeShareObject({ ...base.shares, ...(saved.shares || {}) });
+    const targetShares = normalizeShareObject({ ...shares, ...(saved.targetShares || {}) });
+    return [districtDef.id, {
+      ...base,
+      ...saved,
+      id: districtDef.id,
+      unlocked: Boolean(saved.unlocked ?? base.unlocked),
+      controlled: Boolean(saved.controlled),
+      dominated: Boolean(saved.dominated),
+      leaderDays: Math.max(0, Number(saved.leaderDays || 0)),
+      controlledDays: Math.max(0, Number(saved.controlledDays || 0)),
+      dominanceDays: Math.max(0, Number(saved.dominanceDays || 0)),
+      status: typeof saved.status === "string" ? saved.status : base.status,
+      shares,
+      targetShares,
+      loyalty: { ...base.loyalty, ...(saved.loyalty || {}) },
+      localAd: saved.localAd && Number(saved.localAd.days) > 0 ? saved.localAd : null,
+      competitorCampaigns: saved.competitorCampaigns && typeof saved.competitorCampaigns === "object" ? saved.competitorCampaigns : {},
+      pickupPoints,
+      warehouses: Array.isArray(saved.warehouses) ? saved.warehouses : base.warehouses,
+      history: Array.isArray(saved.history) ? saved.history.slice(-14) : base.history
+    }];
+  }));
+}
+
+function mergePickupPoints(basePoints = [], savedPoints = []) {
+  const savedById = new Map((Array.isArray(savedPoints) ? savedPoints : []).map(point => [point.id, point]));
+  return basePoints.map(basePoint => {
+    const saved = savedById.get(basePoint.id) || {};
+    const owner = ["player", "lowprice", "premiumbox", "fastgo", null].includes(saved.owner) ? saved.owner : basePoint.owner;
+    const level = owner ? clamp(Number(saved.level ?? basePoint.level), 1, 4) : 0;
+    return {
+      ...basePoint,
+      ...saved,
+      owner,
+      level,
+      name: sanitizeFacilityName(saved.name || basePoint.name),
+      capacity: owner ? Math.max(20, Number(saved.capacity || basePoint.capacity || 42)) : 0,
+      load: owner ? clamp(Number(saved.load ?? basePoint.load), 0, 1.25) : 0,
+      staff: owner ? Math.max(1, Math.floor(Number(saved.staff || basePoint.staff || 1))) : 0,
+      serviceSpeed: owner ? clamp(Number(saved.serviceSpeed || basePoint.serviceSpeed || 0.9), 0.4, 2.2) : 0,
+      rating: owner ? clamp(Number(saved.rating || basePoint.rating || 4.1), 1, 5) : 0,
+      condition: clamp(Number(saved.condition || basePoint.condition || 0.75), 0.25, 1.05),
+      awareness: clamp(Number(saved.awareness || basePoint.awareness || 0), 0, 1),
+      coverage: Math.max(0, Number(saved.coverage || basePoint.coverage || 8)),
+      queue: Math.max(0, Number(saved.queue || basePoint.queue || 0)),
+      income: Math.max(0, Number(saved.income || 0)),
+      expenses: Math.max(0, Number(saved.expenses || 0)),
+      problems: Array.isArray(saved.problems) ? saved.problems : []
+    };
+  });
+}
+
+function sanitizeStoreName(value) {
+  const text = String(value || "").trim().replace(/\s+/g, " ");
+  return text.slice(0, 24);
+}
+
+function sanitizeFacilityName(value) {
+  const text = String(value || "").trim().replace(/\s+/g, " ");
+  return text.slice(0, 42);
+}
+
+function normalizeShareObject(input = {}) {
+  const owners = ["player", "lowprice", "premiumbox", "fastgo", "other"];
+  const raw = Object.fromEntries(owners.map(owner => [owner, Math.max(0, Number(input[owner] || 0))]));
+  const total = Object.values(raw).reduce((sum, value) => sum + value, 0) || 1;
+  const normalized = Object.fromEntries(owners.map(owner => [owner, Math.round(raw[owner] / total * 1000) / 10]));
+  const drift = Math.round((100 - Object.values(normalized).reduce((sum, value) => sum + value, 0)) * 10) / 10;
+  normalized.other = Math.max(0, Math.round((normalized.other + drift) * 10) / 10);
+  return normalized;
 }
 
 function mergeDeep(base, saved) {
@@ -558,7 +673,7 @@ function spendActionPoint(label) {
 }
 
 function warehouseCapacity() {
-  return ECONOMY.baseWarehouseCapacity + upgradeLevel("warehouse") * 25;
+  return ECONOMY.baseWarehouseCapacity + upgradeLevel("warehouse") * 25 + warehouseFacilityCapacity();
 }
 
 function storageUsed(extraShipments = false) {
@@ -710,13 +825,13 @@ function effectiveAdCost() {
 function effectiveDeliveryCost() {
   const event = currentMarketEvent();
   const discount = upgradeLevel("logistics") * 9;
-  return Math.round(Math.max(45, DELIVERY_COST - discount) * (event.logisticsMultiplier || 1));
+  return Math.round(Math.max(45, DELIVERY_COST - discount) * (event.logisticsMultiplier || 1) * (1 - cityLogisticsDiscount()));
 }
 
 function effectiveReturnLogisticsCost() {
   const event = currentMarketEvent();
   const discount = upgradeLevel("logistics") * 5;
-  return Math.round(Math.max(35, RETURN_LOGISTICS_COST - discount) * (event.logisticsMultiplier || 1));
+  return Math.round(Math.max(35, RETURN_LOGISTICS_COST - discount) * (event.logisticsMultiplier || 1) * (1 - cityLogisticsDiscount()));
 }
 
 function effectiveReturnRate(product) {
@@ -738,7 +853,7 @@ function productDemandMultiplier(product) {
   const cardBoost = 1 + (item?.card?.upgrades?.length || 0) * 0.08 + (item?.card?.trust || 0) * 0.12 + (staffHired("content") ? 0.04 : 0);
   const actionBoost = currentDailyAction().demandMultiplier || 1;
   const featuredBoost = state.featuredProductId === product.id ? 1.34 : 1;
-  return (event.demandMultiplier || 1) * categoryBoost * brandBoost * analyticsBoost * cardBoost * actionBoost * featuredBoost;
+  return (event.demandMultiplier || 1) * categoryBoost * brandBoost * analyticsBoost * cardBoost * actionBoost * featuredBoost * citySalesMultiplier(product);
 }
 
 function competitionFactor(product) {
@@ -914,11 +1029,473 @@ function receiveDueShipments() {
 function holdingCost() {
   const discount = 1 - upgradeLevel("warehouse") * 0.06;
   const staffDiscount = staffHired("warehouse") ? 0.15 : 0;
-  return Math.round(storageUsed(false) * ECONOMY.storageCostPerUnit * Math.max(0.45, discount - staffDiscount));
+  return Math.round(storageUsed(false) * ECONOMY.storageCostPerUnit * Math.max(0.45, discount - staffDiscount - cityStorageDiscount()));
 }
 
 function activeStockProducts() {
   return ownedProducts().filter(product => !state.inventory[product.id]?.stopped && state.inventory[product.id]?.qty > 0);
+}
+
+function storeName() {
+  return sanitizeStoreName(state?.city?.storeName) || "MarketFox";
+}
+
+function applyTheme() {
+  const color = state?.city?.brandColor || CITY_CONFIG.brandColors[0];
+  document.documentElement.style.setProperty("--accent", color);
+}
+
+function districtState(districtId) {
+  return state.districts?.[districtId] || CITY.initialDistrictState()[districtId];
+}
+
+function districtDef(districtId) {
+  return DISTRICT_BY_ID[districtId] || DISTRICTS[0];
+}
+
+function ownerName(ownerId) {
+  if (ownerId === PLAYER_OWNER) return storeName();
+  return CITY_OWNERS[ownerId]?.name || "Свободно";
+}
+
+function ownerShortName(ownerId) {
+  if (ownerId === PLAYER_OWNER) return storeName();
+  return CITY_OWNERS[ownerId]?.shortName || "Свободно";
+}
+
+function ownerColor(ownerId) {
+  if (ownerId === PLAYER_OWNER) return state?.city?.brandColor || CITY_CONFIG.brandColors[0];
+  return CITY_OWNERS[ownerId]?.color || "#9aa1ad";
+}
+
+function allPickupPoints(ownerId = null) {
+  const points = [];
+  for (const district of Object.values(state.districts || {})) {
+    for (const point of district.pickupPoints || []) {
+      if (!ownerId || point.owner === ownerId) points.push(point);
+    }
+  }
+  return points;
+}
+
+function playerPickupPoints(districtId = null) {
+  if (districtId) return (districtState(districtId).pickupPoints || []).filter(point => point.owner === PLAYER_OWNER);
+  return allPickupPoints(PLAYER_OWNER);
+}
+
+function freePickupPoints(districtId) {
+  return (districtState(districtId).pickupPoints || []).filter(point => !point.owner);
+}
+
+function totalStockUnits() {
+  return Object.values(state.inventory || {}).reduce((sum, item) => sum + (item.qty || 0), 0);
+}
+
+function averagePriceRatio() {
+  const products = ownedProducts();
+  if (!products.length) return 1;
+  return avg(products.map(product => {
+    const item = state.inventory[product.id];
+    const market = currentMarket(product).price || product.marketPrice;
+    return item?.price ? item.price / market : 1;
+  }));
+}
+
+function controlledDistricts() {
+  return DISTRICTS.filter(district => districtState(district.id).controlled);
+}
+
+function unlockedDistricts() {
+  return DISTRICTS.filter(district => districtState(district.id).unlocked);
+}
+
+function activeBonusDistrictIds() {
+  return controlledDistricts().map(district => district.id);
+}
+
+function districtAccessState(districtId) {
+  const district = districtState(districtId);
+  if (district.unlocked) return "unlocked";
+  const controlled = new Set(activeBonusDistrictIds());
+  const neighbors = districtDef(districtId).neighbors || [];
+  return neighbors.some(id => controlled.has(id)) ? "available" : "locked";
+}
+
+function districtAverageRating(districtId) {
+  const points = playerPickupPoints(districtId);
+  if (!points.length) return 0;
+  return avg(points.map(point => point.rating || 0));
+}
+
+function districtAverageLoad(districtId) {
+  const points = playerPickupPoints(districtId);
+  if (!points.length) return 0;
+  return avg(points.map(point => point.load || 0));
+}
+
+function playerShare(districtId) {
+  return districtState(districtId).shares?.player || 0;
+}
+
+function districtLeaderOwner(districtId) {
+  const shares = districtState(districtId).shares || {};
+  return Object.entries(shares).sort((a, b) => b[1] - a[1])[0]?.[0] || "other";
+}
+
+function districtStatusInfo(districtId) {
+  const district = districtState(districtId);
+  const share = playerShare(districtId);
+  if (!district.unlocked) {
+    return districtAccessState(districtId) === "available"
+      ? { id: "available", title: "Доступен для экспансии", className: "available" }
+      : { id: "locked", title: "Закрыт", className: "locked" };
+  }
+  if (district.dominated) return { id: "dominance", title: "Доминирование", className: "dominance" };
+  if (district.controlled) return { id: "controlled", title: "Контроль", className: "controlled" };
+  if (share >= CITY_CONFIG.leaderShare) return { id: "leader", title: "Лидер", className: "leader" };
+  if (share >= CITY_CONFIG.contestedShare) return { id: "contested", title: "Спорный", className: "contested" };
+  if (playerPickupPoints(districtId).length) return { id: "presence", title: "Присутствие", className: "presence" };
+  return { id: "none", title: "Нет присутствия", className: "none" };
+}
+
+function cityWorth() {
+  const pvzValue = playerPickupPoints().reduce((sum, point) => sum + 4500 + point.level * 3200 + point.rating * 420, 0);
+  const warehouseValue = state.city?.builtCityWarehouse ? CITY_CONFIG.cityWarehouseCost * 0.72 : 0;
+  return Math.round(state.balance + inventoryValue() + pvzValue + warehouseValue);
+}
+
+function cityLogisticsDiscount() {
+  const controlled = new Set(activeBonusDistrictIds());
+  let discount = 0;
+  if (controlled.has("south")) discount += 0.02;
+  if (controlled.has("industrial")) discount += 0.08;
+  if (state.city?.builtCityWarehouse) discount += 0.06;
+  return clamp(discount, 0, 0.24);
+}
+
+function cityStorageDiscount() {
+  const controlled = new Set(activeBonusDistrictIds());
+  let discount = 0;
+  if (controlled.has("industrial")) discount += 0.1;
+  if (state.city?.builtCityWarehouse) discount += 0.06;
+  return clamp(discount, 0, 0.22);
+}
+
+function citySalesMultiplier(product) {
+  const controlled = new Set(activeBonusDistrictIds());
+  const averageShare = avg(unlockedDistricts().map(district => playerShare(district.id)));
+  let multiplier = 1 + averageShare / 100 * 0.12;
+
+  if (controlled.has("central")) multiplier += 0.05;
+  if (controlled.has("residential")) multiplier += 0.04;
+  if (controlled.has("south")) multiplier += 0.02;
+  if (controlled.has("university") && ["Электроника", "Одежда", "Тренд"].includes(product.category)) multiplier += 0.08;
+  if (controlled.has("elite") && ["Электроника", "Одежда"].includes(product.category)) multiplier += 0.07;
+  return clamp(multiplier, 0.75, 1.38);
+}
+
+function warehouseFacilityCapacity() {
+  return state.city?.builtCityWarehouse ? CITY_CONFIG.cityWarehouseCapacity : 0;
+}
+
+function warehouseFacilityDailyCost() {
+  const smallWarehouses = Object.values(state.districts || {}).flatMap(district => district.warehouses || []);
+  const smallCost = smallWarehouses
+    .filter(warehouse => warehouse.owner === PLAYER_OWNER)
+    .reduce((sum, warehouse) => sum + (warehouse.dailyCost || CITY_CONFIG.smallWarehouseDailyCost), 0);
+  return smallCost + (state.city?.builtCityWarehouse ? CITY_CONFIG.cityWarehouseDailyCost : 0);
+}
+
+function pickupOpenCost(districtId, point) {
+  const district = districtDef(districtId);
+  const neighborDiscount = districtAccessState(districtId) === "available" ? 0.92 : 1;
+  return Math.round(CITY_CONFIG.pickupOpenBaseCost * district.rentFactor * point.traffic * neighborDiscount / 100) * 100;
+}
+
+function pickupUpgradeCost(point) {
+  const district = districtDef(point.districtId);
+  return Math.round(CITY_CONFIG.pickupUpgradeBaseCost * district.rentFactor * (point.level + 0.35) / 100) * 100;
+}
+
+function expansionCost(districtId) {
+  const district = districtDef(districtId);
+  const centralBonus = districtState("central").controlled ? 0.92 : 1;
+  return Math.round(CITY_CONFIG.expansionBaseCost * district.rentFactor * centralBonus / 100) * 100;
+}
+
+function districtAdCost(districtId, strategyId) {
+  const district = districtDef(districtId);
+  const strategy = CITY_CONFIG.districtAdStrategies.find(item => item.id === strategyId) || CITY_CONFIG.districtAdStrategies[1];
+  const universityDiscount = districtState("university").controlled && ["Электроника", "Одежда", "Тренд"].some(category => district.popularCategories.includes(category)) ? 0.88 : 1;
+  return Math.round(district.adCost * strategy.costFactor * universityDiscount / 10) * 10;
+}
+
+function pickupPointById(pointId) {
+  for (const district of Object.values(state.districts || {})) {
+    const point = (district.pickupPoints || []).find(item => item.id === pointId);
+    if (point) return point;
+  }
+  return null;
+}
+
+function pickupPointInfluence(point, district, ownerId) {
+  if (!point.owner) return 0;
+  const ownerService = ownerId === "premiumbox" ? 1.16 : ownerId === "fastgo" ? 1.08 : ownerId === "lowprice" ? 0.92 : 1;
+  const levelFactor = 0.7 + point.level * 0.34;
+  const ratingFactor = clamp((point.rating || 4) / 4.5, 0.55, 1.22);
+  const loadPenalty = point.load > 0.95 ? 0.68 : point.load > 0.82 ? 0.84 : 1;
+  const queuePenalty = clamp(1 - (point.queue || 0) / 80, 0.62, 1);
+  const conditionFactor = clamp(point.condition || 0.8, 0.45, 1.1);
+  const staffFactor = clamp((point.staff || 1) / Math.max(1, point.level), 0.75, 1.22);
+  return point.traffic * 24 * levelFactor * ratingFactor * loadPenalty * queuePenalty * conditionFactor * staffFactor * ownerService * district.transport;
+}
+
+function playerDistrictInfluence(districtId) {
+  const district = districtDef(districtId);
+  const stateDistrict = districtState(districtId);
+  const points = playerPickupPoints(districtId);
+  if (!points.length) return 0.1;
+
+  const pointInfluence = points.reduce((sum, point) => sum + pickupPointInfluence(point, district, PLAYER_OWNER), 0);
+  const stockFactor = clamp(totalStockUnits() / 45, 0.45, 1.22);
+  const priceRatio = averagePriceRatio();
+  const priceFactor = priceRatio >= ZERO_DEMAND_PRICE_RATIO
+    ? 0.16
+    : clamp(1.18 - Math.max(0, priceRatio - 1) * district.priceSensitivity * 0.58 + Math.max(0, 1 - priceRatio) * 0.18, 0.32, 1.26);
+  const serviceFactor = clamp(state.rating / 4.5, 0.66, 1.16) * clamp(districtAverageRating(districtId) / 4.35 || 1, 0.72, 1.16);
+  const adBoost = stateDistrict.localAd?.days > 0 ? stateDistrict.localAd.boost : 0;
+  const loyaltyBoost = 1 + clamp((stateDistrict.loyalty?.player || 0) / 100, 0, 0.28);
+  const controlledBoost = stateDistrict.controlled ? 1.07 : 1;
+  return Math.max(0.1, pointInfluence * stockFactor * priceFactor * serviceFactor * loyaltyBoost * controlledBoost + adBoost);
+}
+
+function competitorDistrictInfluence(districtId, competitorId) {
+  const district = districtDef(districtId);
+  const stateDistrict = districtState(districtId);
+  const competitorDef = CITY_COMPETITORS.find(item => item.id === competitorId);
+  const company = state.cityCompetitors?.[competitorId];
+  const points = (stateDistrict.pickupPoints || []).filter(point => point.owner === competitorId);
+  const pointInfluence = points.reduce((sum, point) => sum + pickupPointInfluence(point, district, competitorId), 0);
+  const cashFactor = company?.cash <= 0 ? 0.62 : company?.cash < 8000 ? 0.82 : 1;
+  const campaign = stateDistrict.competitorCampaigns?.[competitorId];
+  const campaignBoost = campaign?.days > 0 ? campaign.boost : 0;
+  const loyaltyBoost = 1 + clamp((stateDistrict.loyalty?.[competitorId] || 0) / 100, 0, 0.3);
+  const strategyFactor = (competitorDef?.pricePressure || 1) * 0.34 + (competitorDef?.service || 1) * 0.33 + (competitorDef?.logistics || 1) * 0.33;
+  return Math.max(1, (pointInfluence + district.competition * 18) * strategyFactor * loyaltyBoost * cashFactor + campaignBoost);
+}
+
+function calculateDistrictInfluences(districtId) {
+  const district = districtDef(districtId);
+  return {
+    player: playerDistrictInfluence(districtId),
+    lowprice: competitorDistrictInfluence(districtId, "lowprice"),
+    premiumbox: competitorDistrictInfluence(districtId, "premiumbox"),
+    fastgo: competitorDistrictInfluence(districtId, "fastgo"),
+    other: 18 + district.population / 6500
+  };
+}
+
+function influencesToShares(influences) {
+  return normalizeShareObject(influences);
+}
+
+function moveShares(currentShares, targetShares, inertia) {
+  const owners = ["player", "lowprice", "premiumbox", "fastgo", "other"];
+  const moved = Object.fromEntries(owners.map(owner => {
+    const current = Number(currentShares?.[owner] || 0);
+    const target = Number(targetShares?.[owner] || 0);
+    return [owner, current + (target - current) * inertia];
+  }));
+  return normalizeShareObject(moved);
+}
+
+function updateDistrictStatus(districtId) {
+  const district = districtState(districtId);
+  const share = playerShare(districtId);
+  const pvzCount = playerPickupPoints(districtId).length;
+  const rating = districtAverageRating(districtId);
+  const load = districtAverageLoad(districtId);
+  const canControl = share >= CITY_CONFIG.controlShare && pvzCount >= 2 && rating >= CITY_CONFIG.minControlRating && load <= CITY_CONFIG.maxControlLoad;
+
+  if (!district.unlocked) {
+    district.status = "locked";
+    return null;
+  }
+
+  if (share >= CITY_CONFIG.leaderShare) district.leaderDays += 1;
+  else district.leaderDays = 0;
+
+  if (canControl) district.controlledDays += 1;
+  else district.controlledDays = 0;
+
+  if (district.controlled && (share < CITY_CONFIG.lossShare || rating < CITY_CONFIG.minControlRating - 0.25 || load > 1.05)) {
+    district.controlled = false;
+    district.dominated = false;
+    district.status = share >= CITY_CONFIG.contestedShare ? "contested" : "presence";
+    return { type: "lost", districtName: districtDef(districtId).name };
+  }
+
+  if (!district.controlled && district.controlledDays >= CITY_CONFIG.controlHoldDays) {
+    district.controlled = true;
+    district.status = "controlled";
+    return { type: "controlled", districtName: districtDef(districtId).name };
+  }
+
+  if (district.controlled && share >= CITY_CONFIG.dominanceShare && pvzCount >= 3 && rating >= 4.45) district.dominanceDays += 1;
+  else district.dominanceDays = 0;
+
+  district.dominated = district.dominanceDays >= CITY_CONFIG.dominanceHoldDays;
+  district.status = districtStatusInfo(districtId).id;
+  return null;
+}
+
+function updateCityProgression() {
+  const controlledCount = controlledDistricts().length;
+  const firstPvzLevel = playerPickupPoints("south")[0]?.level || 1;
+  state.city.unlockedMechanics = {
+    ...state.city.unlockedMechanics,
+    districtMap: true,
+    competition: firstPvzLevel >= 2 || state.day >= 3,
+    expansion: controlledCount >= 1,
+    cityWarehouse: controlledCount >= 2,
+    management: controlledCount >= 2 || staffHired("analyst")
+  };
+}
+
+function updateDistrictsForNewDay(report) {
+  updateCityProgression();
+  runCompetitorCityActions();
+  const snapshots = [];
+  const events = [];
+
+  for (const districtDefItem of DISTRICTS) {
+    const district = districtState(districtDefItem.id);
+    if (!district.unlocked) continue;
+
+    const influences = calculateDistrictInfluences(districtDefItem.id);
+    const targetShares = influencesToShares(influences);
+    district.targetShares = targetShares;
+    district.shares = moveShares(district.shares, targetShares, CITY_CONFIG.shareInertia);
+
+    for (const owner of Object.keys(district.loyalty || {})) {
+      const current = Number(district.loyalty[owner] || 0);
+      const target = Number(district.shares[owner] || 0);
+      district.loyalty[owner] = Math.round((current + (target - current) * CITY_CONFIG.loyaltyInertia) * 10) / 10;
+    }
+
+    for (const point of district.pickupPoints || []) {
+      if (!point.owner) continue;
+      const ownerShare = district.shares[point.owner] || 0;
+      const loadTarget = clamp(ownerShare / Math.max(12, point.capacity / 4) * point.traffic, 0.12, 1.2);
+      point.load = Math.round((point.load * 0.7 + loadTarget * 0.3) * 100) / 100;
+      point.queue = Math.max(0, Math.round((point.load - 0.72) * 52 / Math.max(0.72, point.serviceSpeed || 1)));
+      if (point.owner === PLAYER_OWNER) {
+        const queuePenalty = point.queue > 16 ? -0.045 : point.queue > 8 ? -0.018 : 0.012;
+        point.rating = clamp(point.rating + queuePenalty + (state.rating - 4.4) * 0.004, 1, 5);
+        point.awareness = clamp(point.awareness + 0.025 + (district.localAd?.days > 0 ? 0.06 : 0), 0, 1);
+        point.income = Math.round((report?.sold || 0) * 16 * point.traffic * (district.shares.player || 0) / 100);
+        point.expenses = pickupDailyExpense(point);
+      }
+    }
+
+    const statusEvent = updateDistrictStatus(districtDefItem.id);
+    if (statusEvent?.type === "controlled") {
+      events.push(`Район «${statusEvent.districtName}» теперь контролирует ${storeName()}. Открыты новые бонусы и направления экспансии.`);
+    }
+    if (statusEvent?.type === "lost") {
+      events.push(`Контроль района «${statusEvent.districtName}» потерян: доля и сервис просели ниже безопасного уровня.`);
+    }
+
+    if (district.localAd?.days > 0) district.localAd.days -= 1;
+    if (district.localAd?.days <= 0) district.localAd = null;
+    for (const [competitorId, campaign] of Object.entries(district.competitorCampaigns || {})) {
+      campaign.days = Math.max(0, Number(campaign.days || 0) - 1);
+      if (campaign.days <= 0) delete district.competitorCampaigns[competitorId];
+    }
+
+    const snapshot = {
+      id: districtDefItem.id,
+      playerShare: district.shares.player,
+      targetShare: targetShares.player,
+      status: district.status,
+      controlled: district.controlled
+    };
+    district.history = [{ day: state.day, ...snapshot }, ...(district.history || [])].slice(0, 14);
+    snapshots.push(snapshot);
+  }
+
+  state.districtShareHistory = [{ day: state.day, districts: snapshots }, ...(state.districtShareHistory || [])].slice(0, 20);
+  updateCityProgression();
+  return { snapshots, events };
+}
+
+function pickupDailyExpense(point) {
+  const district = districtDef(point.districtId);
+  const salary = point.staff * 260;
+  const maintenance = 130 + point.level * 90 + (point.condition < 0.65 ? 160 : 0);
+  return Math.round((point.rent || 0) + salary + maintenance + district.rentFactor * 60);
+}
+
+function pickupNetworkDailyExpense() {
+  return playerPickupPoints().reduce((sum, point) => sum + pickupDailyExpense(point), 0);
+}
+
+function pickupNetworkDailyIncome(soldTotal) {
+  const points = playerPickupPoints();
+  if (!points.length || soldTotal <= 0) return 0;
+  const serviceRating = clamp(avg(points.map(point => point.rating || 4)) / 4.3, 0.72, 1.18);
+  const shareBoost = clamp(avg(unlockedDistricts().map(district => playerShare(district.id))) / 40, 0.25, 1.45);
+  return Math.round(soldTotal * 28 * serviceRating * shareBoost);
+}
+
+function runCompetitorCityActions() {
+  const unlocked = unlockedDistricts();
+  if (!unlocked.length) return;
+
+  for (const competitor of CITY_COMPETITORS) {
+    const company = state.cityCompetitors?.[competitor.id];
+    if (!company || company.cash < 1000) continue;
+    const threatened = unlocked
+      .map(district => ({ district, share: playerShare(district.id), competitorShare: districtState(district.id).shares[competitor.id] || 0 }))
+      .filter(item => item.share >= 24 || item.competitorShare >= 22)
+      .sort((a, b) => (b.share - a.share) || (b.competitorShare - a.competitorShare));
+    const fallbackDistrict = unlocked[Math.floor(random() * unlocked.length)];
+    const target = threatened[0] || (fallbackDistrict ? {
+      district: fallbackDistrict,
+      share: playerShare(fallbackDistrict.id),
+      competitorShare: districtState(fallbackDistrict.id).shares[competitor.id] || 0
+    } : null);
+    if (!target) continue;
+
+    const district = districtState(target.district.id);
+    const adCost = Math.round((target.district.adCost * (0.75 + competitor.aggressiveness)) / 10) * 10;
+    if (company.cash >= adCost && (target.share >= 24 || random() < competitor.aggressiveness * 0.22)) {
+      company.cash -= adCost;
+      company.totalSpent += adCost;
+      district.competitorCampaigns[competitor.id] = {
+        boost: Math.round(12 + competitor.aggressiveness * 24),
+        days: 1,
+        spend: adCost
+      };
+    }
+
+    const freePoint = (district.pickupPoints || []).find(point => !point.owner);
+    const openingCost = Math.round(CITY_CONFIG.pickupOpenBaseCost * target.district.rentFactor * 0.84 / 100) * 100;
+    if (freePoint && company.cash >= openingCost && target.share >= 34 && random() < competitor.aggressiveness * 0.35) {
+      company.cash -= openingCost;
+      company.totalSpent += openingCost;
+      company.pvzOpened += 1;
+      freePoint.owner = competitor.id;
+      freePoint.name = `${competitor.title} ${company.pvzOpened + 1}`;
+      freePoint.level = 1;
+      freePoint.capacity = 58;
+      freePoint.staff = 1;
+      freePoint.serviceSpeed = competitor.id === "fastgo" ? 1.04 : 0.9;
+      freePoint.rating = competitor.id === "premiumbox" ? 4.65 : competitor.id === "lowprice" ? 3.95 : 4.35;
+      freePoint.load = 0.38;
+      freePoint.awareness = 0.32;
+    }
+  }
 }
 
 function cardUpgradeBoost(item) {
@@ -995,16 +1572,27 @@ function goalClaimed(goal) {
 }
 
 function render() {
+  applyTheme();
   headerDay.textContent = state.day;
+  document.body.classList.toggle("setup-mode", !state.city?.onboardingDone);
+  document.querySelector(".eyebrow").textContent = state.city?.onboardingDone ? `${GAME_TITLE} · ${storeName()}` : GAME_TITLE;
   document.querySelectorAll(".nav-item").forEach(button => {
     button.classList.toggle("active", button.dataset.tab === activeTab);
+    button.disabled = !state.city?.onboardingDone && button.dataset.tab !== "home";
   });
 
+  if (!state.city?.onboardingDone) {
+    pageTitle.textContent = "Новая игра";
+    renderOnboarding();
+    return;
+  }
+
   const titles = {
-    home: "Главная",
+    home: state.city?.mapMode === "district" ? districtDef(state.city.selectedDistrictId).name : "Карта города",
     market: "Рынок",
     stock: "Мои товары",
     warehouse: "Склад",
+    objects: "ПВЗ и объекты",
     analytics: "Аналитика",
     development: "Развитие",
     tasks: "Задания",
@@ -1016,10 +1604,279 @@ function render() {
   if (activeTab === "market") renderMarket();
   if (activeTab === "stock") renderStock();
   if (activeTab === "warehouse") renderWarehouse();
+  if (activeTab === "objects") renderObjects();
   if (activeTab === "analytics") renderAnalytics();
   if (activeTab === "development") renderDevelopment();
   if (activeTab === "tasks") renderTasks();
   if (activeTab === "profile") renderProfile();
+}
+
+function renderOnboarding() {
+  view.innerHTML = `
+    <section class="setup-screen">
+      <div class="setup-map" aria-hidden="true">
+        ${DISTRICTS.map(district => `<span style="left:${district.map.left}%;top:${district.map.top}%;width:${district.map.width}%;height:${district.map.height}%">${escapeHtml(district.name)}</span>`).join("")}
+      </div>
+      <article class="card setup-card">
+        <div class="section-note">Новая кампания</div>
+        <h2>Создайте магазин для первого города</h2>
+        <p>Начните с малого склада и первого ПВЗ в Южном районе. Цель кампании — захватить весь город, вытесняя LowPrice, PremiumBox и FastGo.</p>
+        <div class="field">
+          <label for="store-name">Название магазина</label>
+          <input id="store-name" type="text" maxlength="24" value="MarketFox" autocomplete="off" />
+        </div>
+        <div class="color-swatches" aria-label="Цвет магазина">
+          ${CITY_CONFIG.brandColors.map((color, index) => `
+            <button class="color-swatch ${index === 0 ? "active" : ""}" data-color="${color}" type="button" style="background:${color}" aria-label="Цвет ${index + 1}"></button>
+          `).join("")}
+        </div>
+        <button id="start-campaign" class="primary-btn" type="button">Начать кампанию</button>
+      </article>
+    </section>
+  `;
+
+  let selectedColor = state.city.brandColor || CITY_CONFIG.brandColors[0];
+  document.querySelectorAll(".color-swatch").forEach(button => {
+    button.addEventListener("click", () => {
+      selectedColor = button.dataset.color;
+      document.querySelectorAll(".color-swatch").forEach(item => item.classList.toggle("active", item.dataset.color === selectedColor));
+      document.documentElement.style.setProperty("--accent", selectedColor);
+    });
+  });
+  document.getElementById("start-campaign").addEventListener("click", () => {
+    const input = document.getElementById("store-name");
+    const name = sanitizeStoreName(input.value) || "MarketFox";
+    state.city.storeName = name;
+    state.city.brandColor = selectedColor;
+    state.city.onboardingDone = true;
+    state.events.unshift(`${name} открывает первый ПВЗ в Южном районе.`);
+    saveState();
+    vibrate("medium");
+    render();
+  });
+}
+
+function renderCityCommandCenter(stockUnits, activeAds, warehouse, report) {
+  const controlledCount = controlledDistricts().length;
+  const latestProfit = report?.profit ?? state.financeHistory[0]?.profit ?? 0;
+  return `
+    <section class="city-command">
+      <div class="city-command-top">
+        <div>
+          <div class="hero-label">Баланс ${escapeHtml(storeName())}</div>
+          <div class="hero-balance">${money(state.balance)}</div>
+        </div>
+        <button id="next-day" class="primary-btn city-next-btn" type="button" ${stockUnits === 0 ? "disabled" : ""}>Завершить день</button>
+      </div>
+      <div class="hero-row">
+        <span class="hero-pill">⭐ ${state.rating.toFixed(2)}</span>
+        <span class="hero-pill">📦 ${stockUnits} шт.</span>
+        <span class="hero-pill">🗺️ ${controlledCount}/${DISTRICTS.length} районов</span>
+        <span class="hero-pill">📍 ${playerPickupPoints().length} ПВЗ</span>
+        <span class="hero-pill">🏬 ${warehouse}</span>
+        <span class="hero-pill ${latestProfit >= 0 ? "good-pill" : "bad-pill"}">Вчера ${money(latestProfit)}</span>
+        <span class="hero-pill">⚙️ ${actionsLeft()}/${actionLimit()}</span>
+        <span class="hero-pill">📣 ${activeAds} товарных реклам</span>
+      </div>
+    </section>
+  `;
+}
+
+function renderCityMapSection() {
+  return `
+    <section class="section">
+      <div class="section-heading">
+        <h2>Карта города</h2>
+        <span class="section-note">Выберите район, чтобы открыть карту ПВЗ и локальные действия</span>
+      </div>
+      <div class="city-map" role="list" aria-label="Карта города">
+        ${DISTRICTS.map(district => {
+          const districtData = districtState(district.id);
+          const access = districtAccessState(district.id);
+          const status = districtStatusInfo(district.id);
+          const leader = districtLeaderOwner(district.id);
+          const share = Math.round(playerShare(district.id));
+          return `
+            <button class="district-node ${status.className} ${access}" data-district="${district.id}" type="button"
+              style="--left:${district.map.left}%;--top:${district.map.top}%;--width:${district.map.width}%;--height:${district.map.height}%;--owner:${ownerColor(leader)}">
+              <span>${escapeHtml(district.shortName || district.name)}</span>
+              <strong>${districtData.unlocked ? `${share}%` : access === "available" ? "маршрут" : "закрыт"}</strong>
+            </button>
+          `;
+        }).join("")}
+      </div>
+      <div class="district-legend">
+        <span><i style="background:${ownerColor(PLAYER_OWNER)}"></i>${escapeHtml(storeName())}</span>
+        <span><i style="background:${ownerColor("lowprice")}"></i>LowPrice</span>
+        <span><i style="background:${ownerColor("premiumbox")}"></i>PremiumBox</span>
+        <span><i style="background:${ownerColor("fastgo")}"></i>FastGo</span>
+        <span><i class="mixed"></i>спорный</span>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="district-card-grid">
+        ${DISTRICTS.map(district => renderDistrictSummaryCard(district.id)).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderDistrictSummaryCard(districtId) {
+  const district = districtDef(districtId);
+  const districtData = districtState(districtId);
+  const status = districtStatusInfo(districtId);
+  const leader = districtLeaderOwner(districtId);
+  const access = districtAccessState(districtId);
+  return `
+    <article class="district-summary ${status.className}">
+      <div class="card-top">
+        <div>
+          <h3>${escapeHtml(district.name)}</h3>
+          <div class="product-category">${escapeHtml(district.role)} · лидер: ${escapeHtml(ownerShortName(leader))}</div>
+        </div>
+        <span class="tag ${status.className}">${escapeHtml(status.title)}</span>
+      </div>
+      <div class="share-stack" aria-label="Доли рынка">
+        ${["player", "lowprice", "premiumbox", "fastgo", "other"].map(owner => `
+          <span style="width:${districtData.shares[owner] || 0}%;background:${ownerColor(owner)}"></span>
+        `).join("")}
+      </div>
+      <div class="tags">
+        <span class="tag">${Math.round(playerShare(districtId))}% ${escapeHtml(storeName())}</span>
+        <span class="tag">ПВЗ ${playerPickupPoints(districtId).length}/${districtData.pickupPoints.length}</span>
+        <span class="tag">Реклама ${money(district.adCost)}</span>
+        ${access === "available" ? `<span class="tag good">Можно расширяться</span>` : ""}
+      </div>
+    </article>
+  `;
+}
+
+function renderDistrictMapSection(districtId) {
+  const district = districtDef(districtId);
+  const districtData = districtState(districtId);
+  const access = districtAccessState(districtId);
+  const status = districtStatusInfo(districtId);
+  const pvzCount = playerPickupPoints(districtId).length;
+  const avgRating = districtAverageRating(districtId);
+  const avgLoad = districtAverageLoad(districtId);
+
+  if (!districtData.unlocked) {
+    return `
+      <section class="section">
+        <button id="back-city-map" class="secondary-btn back-map-btn" type="button">← К карте города</button>
+        <article class="card district-locked-card">
+          <div class="section-note">${escapeHtml(district.role)}</div>
+          <h2>${escapeHtml(district.name)}</h2>
+          <p>${access === "available"
+            ? "Район соседствует с вашей контролируемой территорией. Откройте маршрут, затем выберите помещение под первый ПВЗ."
+            : "Район пока закрыт. Сначала закрепите контроль в соседнем районе."}</p>
+          <div class="tags">
+            <span class="tag">Население ${district.population.toLocaleString("ru-RU")}</span>
+            <span class="tag">Аренда x${district.rentFactor.toFixed(2)}</span>
+            <span class="tag">Конкуренция ${Math.round(district.competition * 100)}%</span>
+          </div>
+          <button id="expand-district" class="primary-btn" data-district="${districtId}" type="button" ${access === "available" && state.balance >= expansionCost(districtId) ? "" : "disabled"}>
+            ${access === "available" ? `Открыть маршрут за ${money(expansionCost(districtId))}` : "Маршрут недоступен"}
+          </button>
+        </article>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="section">
+      <button id="back-city-map" class="secondary-btn back-map-btn" type="button">← К карте города</button>
+      <article class="card district-map-card">
+        <div class="district-header">
+          <div>
+            <div class="section-note">${escapeHtml(district.role)}</div>
+            <h2>${escapeHtml(district.name)}</h2>
+          </div>
+          <span class="tag ${status.className}">${escapeHtml(status.title)}</span>
+        </div>
+        <div class="district-local-map" aria-label="Карта района">
+          <span class="road road-a"></span>
+          <span class="road road-b"></span>
+          <span class="zone zone-home">Жильё</span>
+          <span class="zone zone-shop">Трафик</span>
+          ${(districtData.pickupPoints || []).map(point => `
+            <button class="district-point ${point.owner ? `owned owner-${point.owner}` : "free"}" data-point="${point.id}" type="button"
+              style="--x:${point.x}%;--y:${point.y}%;--owner:${ownerColor(point.owner)}" aria-label="${escapeHtml(point.name)}">
+              ${point.owner ? point.level : "+"}
+            </button>
+          `).join("")}
+        </div>
+        <div class="metrics-grid compact-metrics">
+          <article class="metric-card"><div class="metric-label">Доля ${escapeHtml(storeName())}</div><div class="metric-value">${Math.round(playerShare(districtId))}%</div></article>
+          <article class="metric-card"><div class="metric-label">ПВЗ</div><div class="metric-value">${pvzCount}/${districtData.pickupPoints.length}</div></article>
+          <article class="metric-card"><div class="metric-label">Рейтинг сети</div><div class="metric-value">${avgRating ? avgRating.toFixed(2) : "—"}</div></article>
+          <article class="metric-card"><div class="metric-label">Загрузка</div><div class="metric-value">${Math.round(avgLoad * 100)}%</div></article>
+        </div>
+        <div class="tags">
+          <span class="tag">Популярно: ${district.popularCategories.map(escapeHtml).join(", ")}</span>
+          <span class="tag">Бонус: ${escapeHtml(district.bonusTitle)}</span>
+          <span class="tag">Лояльность ${Math.round(districtData.loyalty.player || 0)}%</span>
+          ${districtData.localAd ? `<span class="tag good">Локальная реклама активна</span>` : ""}
+        </div>
+      </article>
+    </section>
+
+    <section class="section">
+      <div class="section-heading">
+        <h2>Локальные решения</h2>
+        <span class="section-note">Реклама резко повышает влияние, но доля рынка меняется плавно</span>
+      </div>
+      <div class="ad-grid district-ad-grid">
+        ${CITY_CONFIG.districtAdStrategies.map(strategy => `
+          <button class="ad-option launch-local-ad" data-district="${districtId}" data-ad="${strategy.id}" type="button" ${pvzCount && state.balance >= districtAdCost(districtId, strategy.id) ? "" : "disabled"}>
+            <span>📣</span>
+            <strong>${escapeHtml(strategy.title)}</strong>
+            <small>${money(districtAdCost(districtId, strategy.id))} · +${strategy.boost} влияния</small>
+          </button>
+        `).join("")}
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-heading">
+        <h2>Точки района</h2>
+        <span class="section-note">Нажмите точку на карте или выберите помещение ниже</span>
+      </div>
+      ${(districtData.pickupPoints || []).map(point => renderPointListItem(point)).join("")}
+    </section>
+  `;
+}
+
+function renderPointListItem(point) {
+  const own = point.owner === PLAYER_OWNER;
+  const free = !point.owner;
+  const cost = free ? pickupOpenCost(point.districtId, point) : own ? pickupUpgradeCost(point) : 0;
+  return `
+    <article class="card compact-card point-list-item">
+      <div class="card-top">
+        <div class="product-main">
+          <div class="product-emoji point-dot" style="--owner:${ownerColor(point.owner)}">${free ? "+" : point.level}</div>
+          <div>
+            <h3 class="product-title">${escapeHtml(point.name)}</h3>
+            <div class="product-category">${free ? "Свободное помещение" : `Владелец: ${escapeHtml(ownerName(point.owner))}`} · ${escapeHtml(point.zone)}</div>
+          </div>
+        </div>
+        <div class="price">${free ? money(cost) : `${point.rating ? point.rating.toFixed(1) : "—"}★`}</div>
+      </div>
+      <div class="tags">
+        <span class="tag">Трафик x${point.traffic.toFixed(2)}</span>
+        <span class="tag">Аренда ${money(point.rent)}</span>
+        <span class="tag">Площадь ${point.area} м²</span>
+        ${own ? `<span class="tag ${point.load > 0.9 ? "bad" : "good"}">Загрузка ${Math.round(point.load * 100)}%</span>` : ""}
+      </div>
+      <div class="product-actions">
+        <button class="secondary-btn inspect-point" data-point="${point.id}" type="button">Детали</button>
+        ${free ? `<button class="primary-btn open-point" data-point="${point.id}" type="button" ${state.balance >= cost ? "" : "disabled"}>Открыть</button>` : ""}
+        ${own ? `<button class="primary-btn upgrade-point" data-point="${point.id}" type="button" ${point.level < 4 && state.balance >= cost ? "" : "disabled"}>${point.level < 4 ? "Улучшить" : "Максимум"}</button>` : ""}
+      </div>
+    </article>
+  `;
 }
 
 function renderHome() {
@@ -1033,18 +1890,9 @@ function renderHome() {
   const warehouse = `${storageUsed(true)}/${warehouseCapacity()}`;
 
   view.innerHTML = `
-    <section class="hero">
-      <div class="hero-label">Баланс магазина</div>
-      <div class="hero-balance">${money(state.balance)}</div>
-      <div class="hero-row">
-        <span class="hero-pill">⭐ ${state.rating.toFixed(2)}</span>
-        <span class="hero-pill">📦 ${stockUnits} шт.</span>
-        <span class="hero-pill">📣 ${activeAds} реклам.</span>
-        <span class="hero-pill">${action.emoji} Фокус</span>
-        <span class="hero-pill">⚙️ ${actionsLeft()}/${actionLimit()}</span>
-      </div>
-      <button id="next-day" class="primary-btn" type="button" ${stockUnits === 0 ? "disabled" : ""}>Завершить день</button>
-    </section>
+    ${renderCityCommandCenter(stockUnits, activeAds, warehouse, report)}
+
+    ${state.city.mapMode === "district" ? renderDistrictMapSection(state.city.selectedDistrictId || "south") : renderCityMapSection()}
 
     ${!state.tutorial.done && !state.tutorial.skipped ? `
       <section class="section">
@@ -1052,7 +1900,7 @@ function renderHome() {
           <div>
             <div class="section-note">Быстрый старт</div>
             <h2>${GAME_TITLE}</h2>
-            <p>Выберите товар на рынке, закажите поставку, задайте цену около рынка и следите за прогнозом спроса. Цена от 180% рынка даёт 0 продаж.</p>
+            <p>Назовите магазин, развивайте ПВЗ на карте района, закупайте товары и удерживайте цену около рынка. Цена от 180% рынка даёт 0 продаж.</p>
           </div>
           <button class="secondary-btn" id="skip-tutorial" type="button">Понятно</button>
         </article>
@@ -1154,9 +2002,15 @@ function renderHome() {
           <div class="report-row"><span>Реклама</span><strong>−${money(report.ads)}</strong></div>
           <div class="report-row"><span>Хранение</span><strong>−${money(report.storageCost || 0)}</strong></div>
           ${report.salaries ? `<div class="report-row"><span>Сотрудники</span><strong>−${money(report.salaries)}</strong></div>` : ""}
+          ${report.pickupIncome ? `<div class="report-row"><span>Доход ПВЗ</span><strong>+${money(report.pickupIncome)}</strong></div>` : ""}
+          ${report.pickupExpenses ? `<div class="report-row"><span>Расходы ПВЗ</span><strong>−${money(report.pickupExpenses)}</strong></div>` : ""}
+          ${report.warehouseFacilityCost ? `<div class="report-row"><span>Инфраструктура складов</span><strong>−${money(report.warehouseFacilityCost)}</strong></div>` : ""}
+          ${report.districtAdSpend ? `<div class="report-row"><span>Районная реклама оплачена</span><strong>−${money(report.districtAdSpend)}</strong></div>` : ""}
           <div class="report-row"><span>Упущенные продажи</span><strong>${report.missedSales || 0}</strong></div>
           ${report.operations ? `<div class="report-row"><span>Фокус и витрина</span><strong>−${money(report.operations)}</strong></div>` : ""}
           <div class="report-row total"><span>Прибыль дня</span><strong class="${report.profit >= 0 ? "positive" : "negative"}">${money(report.profit)}</strong></div>
+          ${(report.districts || []).slice(0, 3).map(item => `<div class="event-item"><span class="event-icon">🗺️</span><span>${escapeHtml(districtDef(item.id).name)}: ${Math.round(item.playerShare)}% (${escapeHtml(districtStatusInfo(item.id).title)})</span></div>`).join("")}
+          ${(report.districtEvents || []).slice(0, 2).map(event => `<div class="event-item"><span class="event-icon">🏁</span><span>${escapeHtml(event)}</span></div>`).join("")}
           ${(report.reasons || []).slice(0, 3).map(reason => `<div class="event-item"><span class="event-icon">i</span><span>${escapeHtml(reason)}</span></div>`).join("")}
         </article>
       </section>
@@ -1171,6 +2025,17 @@ function renderHome() {
   `;
 
   document.getElementById("next-day")?.addEventListener("click", simulateDay);
+  document.querySelectorAll(".district-node").forEach(button => button.addEventListener("click", () => selectDistrict(button.dataset.district)));
+  document.getElementById("back-city-map")?.addEventListener("click", () => {
+    state.city.mapMode = "city";
+    saveState();
+    renderHome();
+  });
+  document.getElementById("expand-district")?.addEventListener("click", event => unlockDistrict(event.currentTarget.dataset.district));
+  document.querySelectorAll(".district-point, .inspect-point").forEach(button => button.addEventListener("click", () => openFacilityModal(button.dataset.point)));
+  document.querySelectorAll(".open-point").forEach(button => button.addEventListener("click", () => openPickupPoint(button.dataset.point)));
+  document.querySelectorAll(".upgrade-point").forEach(button => button.addEventListener("click", () => upgradePickupPoint(button.dataset.point)));
+  document.querySelectorAll(".launch-local-ad").forEach(button => button.addEventListener("click", () => launchLocalAd(button.dataset.district, button.dataset.ad)));
   document.getElementById("resolve-event")?.addEventListener("click", renderDecisionEventModal);
   document.getElementById("skip-tutorial")?.addEventListener("click", () => {
     state.tutorial.skipped = true;
@@ -1378,6 +2243,7 @@ function renderWarehouse() {
   const capacity = warehouseCapacity();
   const fillPercent = clamp(used / capacity * 100, 0, 120);
   const damagedTotal = Object.values(state.inventory).reduce((sum, item) => sum + (item.damaged || 0), 0);
+  const cityWarehouseCost = Math.round(CITY_CONFIG.cityWarehouseCost * (districtState("industrial").controlled ? 0.82 : 1) / 100) * 100;
 
   view.innerHTML = `
     <section class="card">
@@ -1390,7 +2256,25 @@ function renderWarehouse() {
         <span class="tag ${fillPercent > 90 ? "bad" : "good"}">Заполненность ${Math.round(fillPercent)}%</span>
         <span class="tag">Хранение ${money(holdingCost())}/день</span>
         <span class="tag ${damagedTotal ? "bad" : ""}">Брак ${damagedTotal} шт.</span>
+        <span class="tag">Инфраструктура ${money(warehouseFacilityDailyCost())}/день</span>
       </div>
+    </section>
+
+    <section class="section">
+      <article class="card">
+        <div class="section-heading">
+          <h2>Городская логистика</h2>
+          <span class="section-note">${state.city.builtCityWarehouse ? "Городской склад работает" : state.city.unlockedMechanics.cityWarehouse ? "Доступно строительство" : "Откроется после контроля нескольких районов"}</span>
+        </div>
+        <div class="tags">
+          <span class="tag">Скидка доставки ${Math.round(cityLogisticsDiscount() * 100)}%</span>
+          <span class="tag">Скидка хранения ${Math.round(cityStorageDiscount() * 100)}%</span>
+          <span class="tag">Доп. вместимость ${warehouseFacilityCapacity()} ед.</span>
+        </div>
+        <button id="build-city-warehouse" class="secondary-btn" type="button" ${!state.city.builtCityWarehouse && state.city.unlockedMechanics.cityWarehouse && state.balance >= cityWarehouseCost ? "" : "disabled"}>
+          ${state.city.builtCityWarehouse ? "Городской склад построен" : `Построить городской склад (${money(cityWarehouseCost)})`}
+        </button>
+      </article>
     </section>
 
     <section class="section">
@@ -1442,7 +2326,42 @@ function renderWarehouse() {
     </section>
   `;
 
+  document.getElementById("build-city-warehouse")?.addEventListener("click", buildCityWarehouse);
   document.querySelectorAll(".damaged-action").forEach(button => button.addEventListener("click", () => handleDamagedGoods(button.dataset.id, button.dataset.action)));
+}
+
+function renderObjects() {
+  const points = playerPickupPoints();
+  const freeInUnlocked = unlockedDistricts().flatMap(district => freePickupPoints(district.id).slice(0, 2));
+
+  view.innerHTML = `
+    <section class="card">
+      <div class="section-heading">
+        <h2>Сеть ПВЗ</h2>
+        <span class="section-note">Постоянные расходы: ${money(pickupNetworkDailyExpense())}/день</span>
+      </div>
+      <div class="metrics-grid">
+        <article class="metric-card"><div class="metric-label">Точек</div><div class="metric-value">${points.length}</div></article>
+        <article class="metric-card"><div class="metric-label">Средний рейтинг</div><div class="metric-value">${points.length ? avg(points.map(point => point.rating)).toFixed(2) : "—"}</div></article>
+        <article class="metric-card"><div class="metric-label">Средняя загрузка</div><div class="metric-value">${points.length ? `${Math.round(avg(points.map(point => point.load)) * 100)}%` : "—"}</div></article>
+        <article class="metric-card"><div class="metric-label">Контроль районов</div><div class="metric-value">${controlledDistricts().length}/${DISTRICTS.length}</div></article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-heading"><h2>Ваши ПВЗ</h2><span class="section-note">Улучшения повышают влияние и помогают закрепить контроль</span></div>
+      ${points.length ? points.map(point => renderPointListItem(point)).join("") : `<div class="empty-state"><div class="empty-icon">📍</div><h2>ПВЗ нет</h2><p>Откройте первую точку на карте района.</p></div>`}
+    </section>
+
+    <section class="section">
+      <div class="section-heading"><h2>Свободные помещения</h2><span class="section-note">Первые варианты в открытых районах</span></div>
+      ${freeInUnlocked.length ? freeInUnlocked.map(point => renderPointListItem(point)).join("") : `<div class="empty-state"><div class="empty-icon">🏢</div><h2>Свободных помещений нет</h2><p>Откройте соседний район или дождитесь реакции рынка.</p></div>`}
+    </section>
+  `;
+
+  document.querySelectorAll(".inspect-point").forEach(button => button.addEventListener("click", () => openFacilityModal(button.dataset.point)));
+  document.querySelectorAll(".open-point").forEach(button => button.addEventListener("click", () => openPickupPoint(button.dataset.point)));
+  document.querySelectorAll(".upgrade-point").forEach(button => button.addEventListener("click", () => upgradePickupPoint(button.dataset.point)));
 }
 
 function renderAnalytics() {
@@ -1489,6 +2408,33 @@ function renderAnalytics() {
         </article>
       `).join("")}
     </section>
+
+    <section class="section">
+      <div class="section-heading"><h2>Районы</h2><span class="section-note">Доля рынка меняется с инерцией ${Math.round(CITY_CONFIG.shareInertia * 100)}%</span></div>
+      ${DISTRICTS.map(district => {
+        const districtData = districtState(district.id);
+        const status = districtStatusInfo(district.id);
+        return `
+          <article class="card compact-card">
+            <div class="card-top">
+              <div>
+                <h3>${escapeHtml(district.name)}</h3>
+                <div class="product-category">${escapeHtml(status.title)} · цель ${Math.round(districtData.targetShares.player || 0)}%</div>
+              </div>
+              <div class="price">${Math.round(districtData.shares.player || 0)}%</div>
+            </div>
+            <div class="share-stack">
+              ${["player", "lowprice", "premiumbox", "fastgo", "other"].map(owner => `<span style="width:${districtData.shares[owner] || 0}%;background:${ownerColor(owner)}"></span>`).join("")}
+            </div>
+            <div class="tags">
+              <span class="tag">ПВЗ ${playerPickupPoints(district.id).length}</span>
+              <span class="tag">Лояльность ${Math.round(districtData.loyalty.player || 0)}%</span>
+              <span class="tag">Лидер ${escapeHtml(ownerShortName(districtLeaderOwner(district.id)))}</span>
+            </div>
+          </article>
+        `;
+      }).join("")}
+    </section>
   `;
 }
 
@@ -1524,7 +2470,7 @@ function renderTasks() {
 
 function renderProfile() {
   const user = tg?.initDataUnsafe?.user;
-  const name = user?.first_name || "Продавец";
+  const name = storeName();
   const firstLetter = name.trim().charAt(0).toUpperCase() || "И";
   const assets = state.balance + inventoryValue();
   const roi = state.totalRevenue > 0 ? (state.totalProfit / state.totalRevenue) * 100 : 0;
@@ -1535,7 +2481,7 @@ function renderProfile() {
     <article class="card">
       <div class="profile-name">
         <div class="avatar">${escapeHtml(firstLetter)}</div>
-        <div><h2 style="margin-bottom:3px">${escapeHtml(name)}</h2><div class="product-category">Владелец магазина · уровень ${level}</div></div>
+        <div><h2 style="margin-bottom:3px">${escapeHtml(name)}</h2><div class="product-category">${user?.first_name ? `Владелец: ${escapeHtml(user.first_name)} · ` : ""}уровень сети ${level}</div></div>
       </div>
       <div style="margin-top:16px" class="progress"><div style="width:${levelProgress}%"></div></div>
       <div class="section-note" style="margin-top:7px">До следующего уровня: ${50 - state.totalOrders % 50} продаж</div>
@@ -1546,7 +2492,7 @@ function renderProfile() {
         <article class="metric-card"><div class="metric-label">Активы</div><div class="metric-value">${money(assets)}</div></article>
         <article class="metric-card"><div class="metric-label">ROI</div><div class="metric-value ${roi >= 0 ? "positive" : "negative"}">${roi.toFixed(1)}%</div></article>
         <article class="metric-card"><div class="metric-label">Рейтинг</div><div class="metric-value">${state.rating.toFixed(2)}</div></article>
-        <article class="metric-card"><div class="metric-label">Игровых дней</div><div class="metric-value">${state.day - 1}</div></article>
+        <article class="metric-card"><div class="metric-label">Контроль районов</div><div class="metric-value">${controlledDistricts().length}/${DISTRICTS.length}</div></article>
       </div>
     </section>
 
@@ -1556,6 +2502,8 @@ function renderProfile() {
         <div class="report-row"><span>Стоимость остатков</span><strong>${money(inventoryValue())}</strong></div>
         <div class="report-row"><span>Продано товаров</span><strong>${state.totalOrders}</strong></div>
         <div class="report-row"><span>Чистая прибыль</span><strong class="${state.totalProfit >= 0 ? "positive" : "negative"}">${money(state.totalProfit)}</strong></div>
+        <div class="report-row"><span>ПВЗ сети</span><strong>${playerPickupPoints().length}</strong></div>
+        <div class="report-row"><span>Игровых дней</span><strong>${state.day - 1}</strong></div>
         <div class="report-row"><span>Версия сохранения</span><strong>v${state.saveVersion}</strong></div>
       </article>
     </section>
@@ -1675,6 +2623,201 @@ function switchTab(tab) {
   activeTab = tab;
   vibrate("light");
   window.scrollTo({ top: 0, behavior: "smooth" });
+  render();
+}
+
+function selectDistrict(districtId) {
+  if (!DISTRICT_BY_ID[districtId]) return;
+  state.city.selectedDistrictId = districtId;
+  state.city.mapMode = "district";
+  activeTab = "home";
+  saveState();
+  vibrate("light");
+  render();
+}
+
+function openFacilityModal(pointId) {
+  const point = pickupPointById(pointId);
+  if (!point) return;
+  const district = districtDef(point.districtId);
+  const own = point.owner === PLAYER_OWNER;
+  const free = !point.owner;
+  const openCost = pickupOpenCost(point.districtId, point);
+  const upgradeCostValue = own ? pickupUpgradeCost(point) : 0;
+
+  modalContent.innerHTML = `
+    <div class="modal-product">
+      <div class="product-emoji point-dot" style="--owner:${ownerColor(point.owner)}">${free ? "+" : point.level}</div>
+      <div>
+        <h2 id="modal-title" style="margin-bottom:3px">${escapeHtml(point.name)}</h2>
+        <div class="product-category">${escapeHtml(district.name)} · ${escapeHtml(point.zone)}</div>
+      </div>
+    </div>
+    <article class="cost-box">
+      <div class="report-row"><span>Владелец</span><strong>${escapeHtml(free ? "Свободно" : ownerName(point.owner))}</strong></div>
+      <div class="report-row"><span>Трафик</span><strong>x${point.traffic.toFixed(2)}</strong></div>
+      <div class="report-row"><span>Аренда</span><strong>${money(point.rent)}/день</strong></div>
+      <div class="report-row"><span>Площадь</span><strong>${point.area} м²</strong></div>
+      ${free ? `<div class="report-row total"><span>Открытие</span><strong>${money(openCost)}</strong></div>` : ""}
+      ${own ? `
+        <div class="report-row"><span>Рейтинг</span><strong>${point.rating.toFixed(2)}</strong></div>
+        <div class="report-row"><span>Загрузка</span><strong>${Math.round(point.load * 100)}%</strong></div>
+        <div class="report-row"><span>Очередь</span><strong>${point.queue} мин.</strong></div>
+        <div class="report-row"><span>Расходы</span><strong>${money(pickupDailyExpense(point))}/день</strong></div>
+        <div class="report-row total"><span>Улучшение</span><strong>${point.level < 4 ? money(upgradeCostValue) : "максимум"}</strong></div>
+      ` : ""}
+    </article>
+    <div class="tags">
+      <span class="tag">Охват ${point.coverage.toFixed(1)} кварталов</span>
+      <span class="tag">Состояние ${Math.round(point.condition * 100)}%</span>
+      <span class="tag">Потенциал ${Math.round(point.traffic * district.averageCheck * 100)}%</span>
+    </div>
+    ${free ? `<button id="modal-open-point" class="primary-btn" data-point="${point.id}" type="button" ${state.balance >= openCost ? "" : "disabled"}>Открыть ПВЗ</button>` : ""}
+    ${own ? `<button id="modal-upgrade-point" class="primary-btn" data-point="${point.id}" type="button" ${point.level < 4 && state.balance >= upgradeCostValue ? "" : "disabled"}>${point.level < 4 ? "Улучшить ПВЗ" : "Максимальный уровень"}</button>` : ""}
+  `;
+  modalBackdrop.classList.remove("hidden");
+  modalBackdrop.setAttribute("aria-hidden", "false");
+  document.getElementById("modal-open-point")?.addEventListener("click", event => openPickupPoint(event.currentTarget.dataset.point));
+  document.getElementById("modal-upgrade-point")?.addEventListener("click", event => upgradePickupPoint(event.currentTarget.dataset.point));
+}
+
+function openPickupPoint(pointId) {
+  const point = pickupPointById(pointId);
+  if (!point || point.owner) return;
+  const district = districtState(point.districtId);
+  if (!district.unlocked) {
+    notify("Сначала откройте район для экспансии");
+    return;
+  }
+  const cost = pickupOpenCost(point.districtId, point);
+  if (state.balance < cost) {
+    notify("Не хватает денег на открытие ПВЗ");
+    return;
+  }
+  if (!spendActionPoint("открыть ПВЗ")) return;
+
+  state.balance -= cost;
+  const nextNumber = playerPickupPoints(point.districtId).length + 1;
+  point.owner = PLAYER_OWNER;
+  point.name = `${storeName()} ${nextNumber}`;
+  point.level = 1;
+  point.capacity = 48;
+  point.load = 0.24;
+  point.staff = 1;
+  point.serviceSpeed = 0.9;
+  point.rating = 4.25;
+  point.awareness = 0.16;
+  point.coverage = Math.round((point.coverage + 2.5) * 10) / 10;
+  state.events.unshift(`${storeName()} открыл ПВЗ в районе «${districtDef(point.districtId).name}»: ${point.zone}.`);
+  updateCityProgression();
+  saveState();
+  closeModal();
+  vibrate("medium");
+  notify("ПВЗ открыт");
+  render();
+}
+
+function upgradePickupPoint(pointId) {
+  const point = pickupPointById(pointId);
+  if (!point || point.owner !== PLAYER_OWNER) return;
+  if (point.level >= 4) {
+    notify("ПВЗ уже на максимальном уровне");
+    return;
+  }
+  const cost = pickupUpgradeCost(point);
+  if (state.balance < cost) {
+    notify("Не хватает денег на улучшение ПВЗ");
+    return;
+  }
+  if (!spendActionPoint("улучшить ПВЗ")) return;
+
+  state.balance -= cost;
+  point.level += 1;
+  point.capacity += 34;
+  point.staff += point.level >= 3 ? 2 : 1;
+  point.serviceSpeed = Math.round((point.serviceSpeed + 0.14) * 100) / 100;
+  point.rating = clamp(point.rating + 0.08, 1, 5);
+  point.condition = clamp(point.condition + 0.08, 0, 1.05);
+  point.coverage = Math.round((point.coverage + 3.2) * 10) / 10;
+  state.events.unshift(`ПВЗ «${point.name}» улучшен до уровня ${point.level}.`);
+  updateCityProgression();
+  saveState();
+  closeModal();
+  vibrate("medium");
+  notify(`ПВЗ улучшен до уровня ${point.level}`);
+  render();
+}
+
+function launchLocalAd(districtId, strategyId) {
+  const district = districtState(districtId);
+  const strategy = CITY_CONFIG.districtAdStrategies.find(item => item.id === strategyId);
+  if (!district.unlocked || !strategy || !playerPickupPoints(districtId).length) return;
+  const cost = districtAdCost(districtId, strategyId);
+  if (state.balance < cost) {
+    notify("Не хватает денег на локальную рекламу");
+    return;
+  }
+
+  state.balance -= cost;
+  state.city.pendingDistrictAdSpend = (state.city.pendingDistrictAdSpend || 0) + cost;
+  district.localAd = {
+    strategyId: strategy.id,
+    title: strategy.title,
+    boost: strategy.boost,
+    days: strategy.days,
+    spend: cost
+  };
+  state.events.unshift(`${storeName()} запустил локальную рекламу в районе «${districtDef(districtId).name}»: ${strategy.title}.`);
+  saveState();
+  vibrate("light");
+  notify("Локальная реклама запущена");
+  render();
+}
+
+function unlockDistrict(districtId) {
+  const district = districtState(districtId);
+  if (!district || district.unlocked) return;
+  if (districtAccessState(districtId) !== "available") {
+    notify("Сначала захватите соседний район");
+    return;
+  }
+  const cost = expansionCost(districtId);
+  if (state.balance < cost) {
+    notify("Не хватает денег на маршрут экспансии");
+    return;
+  }
+
+  state.balance -= cost;
+  district.unlocked = true;
+  district.status = "none";
+  district.history.unshift({ day: state.day, playerShare: district.shares.player, status: "unlocked" });
+  state.city.selectedDistrictId = districtId;
+  state.city.mapMode = "district";
+  state.events.unshift(`Открыт маршрут экспансии в район «${districtDef(districtId).name}». Теперь можно выбрать помещение под ПВЗ.`);
+  saveState();
+  vibrate("medium");
+  notify("Район открыт для экспансии");
+  render();
+}
+
+function buildCityWarehouse() {
+  if (state.city.builtCityWarehouse) return;
+  if (!state.city.unlockedMechanics.cityWarehouse) {
+    notify("Городской склад откроется после контроля нескольких районов");
+    return;
+  }
+  const industrialDiscount = districtState("industrial").controlled ? 0.82 : 1;
+  const cost = Math.round(CITY_CONFIG.cityWarehouseCost * industrialDiscount / 100) * 100;
+  if (state.balance < cost) {
+    notify("Не хватает денег на городской склад");
+    return;
+  }
+  state.balance -= cost;
+  state.city.builtCityWarehouse = true;
+  state.events.unshift(`Построен городской склад. Вместимость увеличена на ${CITY_CONFIG.cityWarehouseCapacity} ед.`);
+  saveState();
+  vibrate("medium");
+  notify("Городской склад построен");
   render();
 }
 
@@ -2000,6 +3143,9 @@ function simulateDay() {
   const operations = action.cost + (activeFeatured ? FEATURED_PRODUCT_COST : 0);
   const storageCost = holdingCost();
   const salaries = staffSalaryTotal();
+  const pickupExpenses = pickupNetworkDailyExpense();
+  const warehouseFacilityCost = warehouseFacilityDailyCost();
+  const districtAdSpend = state.city.pendingDistrictAdSpend || 0;
   let revenue = 0;
   let refunds = 0;
   let costOfGoods = 0;
@@ -2075,7 +3221,8 @@ function simulateDay() {
     if (strategy.id !== "none" && itemAds > itemRevenue * 0.35) saleReasons.push(`${product.name}: реклама дала трафик, но была дорогой.`);
   }
 
-  const profit = revenue - refunds - costOfGoods - commission - logistics - ads - operations - storageCost - salaries;
+  const pickupIncome = pickupNetworkDailyIncome(soldTotal);
+  const profit = revenue - refunds - costOfGoods - commission - logistics - ads - operations - storageCost - salaries - pickupExpenses - warehouseFacilityCost + pickupIncome;
   state.balance += profit;
   state.totalRevenue += revenue - refunds;
   state.totalProfit += profit;
@@ -2102,6 +3249,10 @@ function simulateDay() {
     ads,
     storageCost,
     salaries,
+    pickupIncome,
+    pickupExpenses,
+    warehouseFacilityCost,
+    districtAdSpend,
     operations,
     missedSales,
     reasons: saleReasons,
@@ -2121,6 +3272,10 @@ function simulateDay() {
     storageCost,
     rating: state.rating
   }, ...state.financeHistory].slice(0, 14);
+  const districtUpdate = updateDistrictsForNewDay(state.lastReport);
+  state.lastReport.districts = districtUpdate.snapshots;
+  state.lastReport.districtEvents = districtUpdate.events;
+  state.city.pendingDistrictAdSpend = 0;
   state.day += 1;
   const nextEvent = pickNextMarketEvent(marketEvent.id);
   state.marketEventId = nextEvent.id;
@@ -2133,7 +3288,7 @@ function simulateDay() {
     : `День завершён с убытком ${money(Math.abs(profit))}. Проверьте цену и рекламу.`;
   const tomorrowEvent = `Завтра: ${nextEvent.title}. ${nextEvent.text}`;
   const decisionEvent = `Фокус: ${action.title}${activeFeatured ? `, товар дня: ${activeFeatured.name}` : ""}.`;
-  state.events = [summary, tomorrowEvent, decisionEvent, ...productEvents, ...state.events].slice(0, 20);
+  state.events = [summary, tomorrowEvent, decisionEvent, ...districtUpdate.events, ...productEvents, ...state.events].slice(0, 24);
   maybeCreateDecisionEvent(state.lastReport);
 
   saveState();

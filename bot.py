@@ -40,7 +40,7 @@ async def start_handler(message: Message) -> None:
     )
     await message.answer(
         "Добро пожаловать в Marketplace Empire!\n"
-        "Закупайте товары, управляйте ценами и развивайте магазин.",
+        "Развивайте сеть ПВЗ, закупайте товары и захватывайте районы города.",
         reply_markup=keyboard,
     )
 
