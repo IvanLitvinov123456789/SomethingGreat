@@ -17,6 +17,156 @@ const PRODUCTS = [
   { id: "notebook", emoji: "📓", name: "Планер на год", category: "Канцелярия", cost: 240, marketPrice: 790, demand: 5, competition: 5, returnRate: 0.02 }
 ];
 
+const MAX_UPGRADE_LEVEL = 5;
+
+const MARKET_EVENTS = [
+  {
+    id: "steady",
+    emoji: "📈",
+    title: "Ровный спрос",
+    text: "Покупатели ведут себя предсказуемо. Хороший день, чтобы тестировать цены.",
+    demandMultiplier: 1,
+    adCostMultiplier: 1,
+    returnMultiplier: 1,
+    categoryBoosts: {}
+  },
+  {
+    id: "electronics",
+    emoji: "⚡",
+    title: "Всплеск электроники",
+    text: "Покупатели ищут гаджеты и аксессуары. Электроника получает больше показов.",
+    demandMultiplier: 1.04,
+    adCostMultiplier: 1,
+    returnMultiplier: 1.02,
+    categoryBoosts: { "Электроника": 1.32, "Аксессуары": 1.14 }
+  },
+  {
+    id: "home",
+    emoji: "🏠",
+    title: "Неделя уюта",
+    text: "Лучше продаются товары для дома. Возвратов чуть меньше обычного.",
+    demandMultiplier: 1.03,
+    adCostMultiplier: 0.96,
+    returnMultiplier: 0.92,
+    categoryBoosts: { "Дом": 1.3 }
+  },
+  {
+    id: "sale_hunters",
+    emoji: "🏷️",
+    title: "Охота за скидками",
+    text: "Спрос растет, но покупатели сильнее реагируют на завышенные цены.",
+    demandMultiplier: 1.16,
+    adCostMultiplier: 1.08,
+    returnMultiplier: 1,
+    priceSensitivity: 1.18,
+    categoryBoosts: {}
+  },
+  {
+    id: "logistics_pressure",
+    emoji: "🚚",
+    title: "Перегрузка доставки",
+    text: "Логистика дорожает, а возвраты становятся болезненнее.",
+    demandMultiplier: 0.96,
+    adCostMultiplier: 1,
+    returnMultiplier: 1.18,
+    logisticsMultiplier: 1.18,
+    categoryBoosts: {}
+  },
+  {
+    id: "kids_sport",
+    emoji: "🎯",
+    title: "Активные выходные",
+    text: "Спорт и детские товары получают дополнительный спрос.",
+    demandMultiplier: 1.06,
+    adCostMultiplier: 0.98,
+    returnMultiplier: 0.98,
+    categoryBoosts: { "Спорт": 1.28, "Детям": 1.24 }
+  }
+];
+
+const UPGRADE_DEFS = [
+  {
+    id: "brand",
+    emoji: "🏆",
+    title: "Бренд магазина",
+    text: "Покупатели охотнее заказывают и чуть лучше реагируют на сервис.",
+    baseCost: 7000,
+    costStep: 1.55,
+    effect: "+2.5% к спросу за уровень"
+  },
+  {
+    id: "logistics",
+    emoji: "🚚",
+    title: "Логистика",
+    text: "Доставка становится дешевле, а возвратов меньше.",
+    baseCost: 6200,
+    costStep: 1.5,
+    effect: "−9 ₽ к доставке за уровень"
+  },
+  {
+    id: "marketing",
+    emoji: "📣",
+    title: "Маркетинг",
+    text: "Реклама дает больше продаж и обходится дешевле.",
+    baseCost: 5600,
+    costStep: 1.48,
+    effect: "+10% к рекламе и −45 ₽/день"
+  },
+  {
+    id: "analytics",
+    emoji: "📊",
+    title: "Аналитика",
+    text: "Точнее выбираете цены и меньше теряете спрос в конкуренции.",
+    baseCost: 8400,
+    costStep: 1.6,
+    effect: "+3.5% к спросу за уровень"
+  }
+];
+
+const GOALS = [
+  {
+    id: "first_orders",
+    title: "Первые 10 продаж",
+    text: "Проверьте товарную гипотезу и получите первые отзывы.",
+    target: 10,
+    reward: 2500,
+    value: () => state.totalOrders
+  },
+  {
+    id: "stable_revenue",
+    title: "Выручка 100 000 ₽",
+    text: "Разгоните оборот магазина до заметного уровня.",
+    target: 100000,
+    reward: 7000,
+    value: () => state.totalRevenue
+  },
+  {
+    id: "quality_rating",
+    title: "Рейтинг 4.70",
+    text: "Держите сервис и возвраты под контролем.",
+    target: 470,
+    reward: 5000,
+    value: () => Math.round(state.rating * 100),
+    progressLabel: value => (value / 100).toFixed(2)
+  },
+  {
+    id: "profit_machine",
+    title: "Прибыль 40 000 ₽",
+    text: "Настройте цены, рекламу и логистику так, чтобы магазин зарабатывал.",
+    target: 40000,
+    reward: 9000,
+    value: () => state.totalProfit
+  },
+  {
+    id: "seller_level",
+    title: "Уровень продавца 3",
+    text: "Продайте 100 товаров и откройте статус сильного продавца.",
+    target: 3,
+    reward: 12000,
+    value: () => sellerLevel()
+  }
+];
+
 const defaultState = () => ({
   day: 1,
   balance: 50000,
@@ -25,6 +175,9 @@ const defaultState = () => ({
   totalProfit: 0,
   totalOrders: 0,
   inventory: {},
+  upgrades: {},
+  claimedGoals: [],
+  marketEventId: "steady",
   lastReport: null,
   events: ["Магазин открыт. Закупите первый товар на вкладке «Рынок»."],
   createdAt: Date.now()
@@ -55,7 +208,14 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return defaultState();
     const parsed = JSON.parse(raw);
-    return { ...defaultState(), ...parsed, inventory: parsed.inventory || {} };
+    return {
+      ...defaultState(),
+      ...parsed,
+      inventory: parsed.inventory || {},
+      upgrades: parsed.upgrades || {},
+      claimedGoals: parsed.claimedGoals || [],
+      marketEventId: parsed.marketEventId || "steady"
+    };
   } catch (error) {
     console.warn("Не удалось загрузить сохранение", error);
     return defaultState();
@@ -101,11 +261,85 @@ function inventoryValue() {
 }
 
 function grossMargin(product, price) {
-  return price - product.cost - price * COMMISSION_RATE - DELIVERY_COST;
+  return price - product.cost - price * COMMISSION_RATE - effectiveDeliveryCost();
 }
 
 function ownedProducts() {
   return PRODUCTS.filter(product => state.inventory[product.id]);
+}
+
+function sellerLevel() {
+  return Math.max(1, Math.floor(state.totalOrders / 50) + 1);
+}
+
+function currentMarketEvent() {
+  return MARKET_EVENTS.find(event => event.id === state.marketEventId) || MARKET_EVENTS[0];
+}
+
+function pickNextMarketEvent(previousId = state.marketEventId) {
+  const pool = MARKET_EVENTS.filter(event => event.id !== previousId);
+  return pool[Math.floor(Math.random() * pool.length)] || MARKET_EVENTS[0];
+}
+
+function upgradeLevel(id) {
+  return clamp(Number(state.upgrades?.[id] || 0), 0, MAX_UPGRADE_LEVEL);
+}
+
+function upgradeCost(upgrade) {
+  return Math.round((upgrade.baseCost * Math.pow(upgrade.costStep, upgradeLevel(upgrade.id))) / 100) * 100;
+}
+
+function effectiveAdCost() {
+  const event = currentMarketEvent();
+  const discount = upgradeLevel("marketing") * 45;
+  return Math.round(Math.max(250, DAILY_AD_COST - discount) * (event.adCostMultiplier || 1));
+}
+
+function effectiveDeliveryCost() {
+  const event = currentMarketEvent();
+  const discount = upgradeLevel("logistics") * 9;
+  return Math.round(Math.max(45, DELIVERY_COST - discount) * (event.logisticsMultiplier || 1));
+}
+
+function effectiveReturnLogisticsCost() {
+  const event = currentMarketEvent();
+  const discount = upgradeLevel("logistics") * 5;
+  return Math.round(Math.max(35, RETURN_LOGISTICS_COST - discount) * (event.logisticsMultiplier || 1));
+}
+
+function effectiveReturnRate(product) {
+  const event = currentMarketEvent();
+  const serviceReduction = 1 - upgradeLevel("logistics") * 0.035 - upgradeLevel("brand") * 0.015;
+  return clamp(product.returnRate * (event.returnMultiplier || 1) * serviceReduction, 0.005, 0.24);
+}
+
+function productDemandMultiplier(product) {
+  const event = currentMarketEvent();
+  const categoryBoost = event.categoryBoosts?.[product.category] || 1;
+  const brandBoost = 1 + upgradeLevel("brand") * 0.025;
+  const analyticsBoost = 1 + upgradeLevel("analytics") * 0.035;
+  return (event.demandMultiplier || 1) * categoryBoost * brandBoost * analyticsBoost;
+}
+
+function competitionFactor(product) {
+  const analyticsRelief = upgradeLevel("analytics") * 0.35;
+  return clamp(1.22 - (product.competition - analyticsRelief) * 0.055, 0.55, 1.12);
+}
+
+function goalValue(goal) {
+  return Math.max(0, goal.value());
+}
+
+function goalProgress(goal) {
+  return clamp(goalValue(goal), 0, goal.target);
+}
+
+function goalDone(goal) {
+  return goalValue(goal) >= goal.target;
+}
+
+function goalClaimed(goal) {
+  return state.claimedGoals.includes(goal.id);
 }
 
 function render() {
@@ -127,6 +361,7 @@ function renderHome() {
   const report = state.lastReport;
   const stockUnits = Object.values(state.inventory).reduce((sum, item) => sum + item.qty, 0);
   const activeAds = Object.values(state.inventory).filter(item => item.adActive).length;
+  const marketEvent = currentMarketEvent();
 
   view.innerHTML = `
     <section class="hero">
@@ -137,8 +372,21 @@ function renderHome() {
         <span class="hero-pill">📦 ${stockUnits} шт.</span>
         <span class="hero-pill">📣 ${activeAds} реклам.</span>
       </div>
-      <button id="next-day" class="primary-btn" type="button" ${stockUnits === 0 ? "disabled" : ""}>Завершить день и получить продажи</button>
+      <button id="next-day" class="primary-btn" type="button" ${stockUnits === 0 ? "disabled" : ""}>Завершить день</button>
     </section>
+
+    <section class="section">
+      <article class="card market-event-card">
+        <div class="market-event-icon">${marketEvent.emoji}</div>
+        <div>
+          <div class="section-note">Рынок сегодня</div>
+          <h2>${escapeHtml(marketEvent.title)}</h2>
+          <p>${escapeHtml(marketEvent.text)}</p>
+        </div>
+      </article>
+    </section>
+
+    ${renderGoalsSection()}
 
     <section class="section">
       <div class="metrics-grid">
@@ -151,7 +399,7 @@ function renderHome() {
 
     ${report ? `
       <section class="section">
-        <div class="section-heading"><h2>Отчёт за день ${report.day}</h2><span class="section-note">Продано ${report.sold} шт.</span></div>
+        <div class="section-heading"><h2>Отчёт за день ${report.day}</h2><span class="section-note">${escapeHtml(report.event || "Рынок")} · продано ${report.sold} шт.</span></div>
         <article class="card report-list">
           <div class="report-row"><span>Выручка</span><strong>${money(report.revenue)}</strong></div>
           <div class="report-row"><span>Возвраты</span><strong>−${money(report.refunds)}</strong></div>
@@ -172,6 +420,48 @@ function renderHome() {
   `;
 
   document.getElementById("next-day")?.addEventListener("click", simulateDay);
+  document.querySelectorAll(".claim-goal").forEach(button => button.addEventListener("click", () => claimGoal(button.dataset.id)));
+}
+
+function renderGoalsSection() {
+  const readyToClaim = GOALS.filter(goal => goalDone(goal) && !goalClaimed(goal)).length;
+
+  return `
+    <section class="section">
+      <div class="section-heading">
+        <h2>Цели сезона</h2>
+        <span class="section-note">${readyToClaim ? `Наград: ${readyToClaim}` : "Прогресс магазина"}</span>
+      </div>
+      <div class="goal-list">
+        ${GOALS.map(goal => {
+          const done = goalDone(goal);
+          const claimed = goalClaimed(goal);
+          const progress = goalProgress(goal);
+          const progressPercent = clamp(progress / goal.target * 100, 0, 100);
+          const currentLabel = goal.progressLabel
+            ? goal.progressLabel(progress)
+            : goal.target >= 10000 ? money(progress) : Math.floor(progress);
+          const targetLabel = goal.progressLabel
+            ? goal.progressLabel(goal.target)
+            : goal.target >= 10000 ? money(goal.target) : goal.target;
+
+          return `
+            <article class="goal-card ${done ? "done" : ""}">
+              <div class="goal-main">
+                <h3>${escapeHtml(goal.title)}</h3>
+                <p>${escapeHtml(goal.text)}</p>
+                <div class="progress"><div style="width:${progressPercent}%"></div></div>
+                <div class="goal-progress">${currentLabel} / ${targetLabel}</div>
+              </div>
+              <button class="small-btn claim-goal" data-id="${goal.id}" type="button" ${done && !claimed ? "" : "disabled"}>
+                ${claimed ? "Получено" : done ? `+${money(goal.reward)}` : `+${money(goal.reward)}`}
+              </button>
+            </article>
+          `;
+        }).join("")}
+      </div>
+    </section>
+  `;
 }
 
 function renderMarket() {
@@ -231,7 +521,7 @@ function renderStock() {
   view.innerHTML = `
     <section class="card">
       <h2>Управление товарами</h2>
-      <p style="color:var(--muted);margin-bottom:0">Слишком высокая цена уменьшает продажи. Реклама стоит ${money(DAILY_AD_COST)} за каждый игровой день.</p>
+      <p style="color:var(--muted);margin-bottom:0">Слишком высокая цена уменьшает продажи. Реклама стоит ${money(effectiveAdCost())} за каждый игровой день.</p>
     </section>
     ${products.map(product => {
       const item = state.inventory[product.id];
@@ -260,7 +550,7 @@ function renderStock() {
               <span class="tag ${margin >= 0 ? "good" : "bad"}">Маржа: ${money(margin)}</span>
             </div>
             <div class="toggle-row">
-              <div><strong>Продвижение</strong><div class="product-category">+примерно 70% показов, ${money(DAILY_AD_COST)}/день</div></div>
+              <div><strong>Продвижение</strong><div class="product-category">+показы зависят от маркетинга, ${money(effectiveAdCost())}/день</div></div>
               <label class="switch">
                 <input class="ad-toggle" data-id="${product.id}" type="checkbox" ${item.adActive ? "checked" : ""} />
                 <span class="slider"></span>
@@ -284,7 +574,7 @@ function renderProfile() {
   const firstLetter = name.trim().charAt(0).toUpperCase() || "И";
   const assets = state.balance + inventoryValue();
   const roi = state.totalRevenue > 0 ? (state.totalProfit / state.totalRevenue) * 100 : 0;
-  const level = Math.max(1, Math.floor(state.totalOrders / 50) + 1);
+  const level = sellerLevel();
   const levelProgress = (state.totalOrders % 50) / 50 * 100;
 
   view.innerHTML = `
@@ -306,6 +596,8 @@ function renderProfile() {
       </div>
     </section>
 
+    ${renderUpgradesSection()}
+
     <section class="section">
       <article class="card report-list">
         <div class="report-row"><span>Денег на балансе</span><strong>${money(state.balance)}</strong></div>
@@ -321,6 +613,44 @@ function renderProfile() {
   `;
 
   document.getElementById("reset-game").addEventListener("click", resetGame);
+  document.querySelectorAll(".buy-upgrade").forEach(button => button.addEventListener("click", () => buyUpgrade(button.dataset.id)));
+}
+
+function renderUpgradesSection() {
+  return `
+    <section class="section">
+      <div class="section-heading">
+        <h2>Развитие магазина</h2>
+        <span class="section-note">До ${MAX_UPGRADE_LEVEL} уровня</span>
+      </div>
+      <div class="upgrade-grid">
+        ${UPGRADE_DEFS.map(upgrade => {
+          const level = upgradeLevel(upgrade.id);
+          const maxed = level >= MAX_UPGRADE_LEVEL;
+          const cost = upgradeCost(upgrade);
+          const canBuy = state.balance >= cost && !maxed;
+
+          return `
+            <article class="upgrade-card">
+              <div class="upgrade-top">
+                <div class="upgrade-icon">${upgrade.emoji}</div>
+                <div>
+                  <h3>${escapeHtml(upgrade.title)}</h3>
+                  <div class="upgrade-level">Уровень ${level}/${MAX_UPGRADE_LEVEL}</div>
+                </div>
+              </div>
+              <p>${escapeHtml(upgrade.text)}</p>
+              <div class="upgrade-effect">${escapeHtml(upgrade.effect)}</div>
+              <div class="progress"><div style="width:${level / MAX_UPGRADE_LEVEL * 100}%"></div></div>
+              <button class="secondary-btn buy-upgrade" data-id="${upgrade.id}" type="button" ${canBuy ? "" : "disabled"}>
+                ${maxed ? "Максимум" : `Улучшить за ${money(cost)}`}
+              </button>
+            </article>
+          `;
+        }).join("")}
+      </div>
+    </section>
+  `;
 }
 
 function switchTab(tab) {
@@ -425,6 +755,44 @@ function toggleAd(productId, enabled) {
   notify(enabled ? "Реклама включена" : "Реклама выключена");
 }
 
+function claimGoal(goalId) {
+  const goal = GOALS.find(item => item.id === goalId);
+  if (!goal || !goalDone(goal) || goalClaimed(goal)) return;
+
+  state.claimedGoals.push(goal.id);
+  state.balance += goal.reward;
+  state.events.unshift(`Получена награда за цель «${goal.title}»: ${money(goal.reward)}.`);
+  saveState();
+  vibrate("medium");
+  notify(`Награда получена: ${money(goal.reward)}`);
+  render();
+}
+
+function buyUpgrade(upgradeId) {
+  const upgrade = UPGRADE_DEFS.find(item => item.id === upgradeId);
+  if (!upgrade) return;
+
+  const level = upgradeLevel(upgrade.id);
+  if (level >= MAX_UPGRADE_LEVEL) {
+    notify("Это улучшение уже на максимальном уровне");
+    return;
+  }
+
+  const cost = upgradeCost(upgrade);
+  if (state.balance < cost) {
+    notify("Не хватает денег на улучшение");
+    return;
+  }
+
+  state.balance -= cost;
+  state.upgrades[upgrade.id] = level + 1;
+  state.events.unshift(`Улучшение «${upgrade.title}» повышено до уровня ${level + 1}.`);
+  saveState();
+  vibrate("medium");
+  notify(`${upgrade.title}: уровень ${level + 1}`);
+  renderProfile();
+}
+
 function estimateReturns(sold, returnRate) {
   if (sold <= 0) return 0;
   let returns = 0;
@@ -441,6 +809,12 @@ function simulateDay() {
     return;
   }
 
+  const marketEvent = currentMarketEvent();
+  const deliveryCost = effectiveDeliveryCost();
+  const returnLogisticsCost = effectiveReturnLogisticsCost();
+  const adCost = effectiveAdCost();
+  const marketingBoost = 1 + upgradeLevel("marketing") * 0.1;
+  const priceSensitivity = marketEvent.priceSensitivity || 1;
   let revenue = 0;
   let refunds = 0;
   let commission = 0;
@@ -454,22 +828,29 @@ function simulateDay() {
     const item = state.inventory[product.id];
     if (!item || item.qty <= 0) continue;
 
-    const priceFactor = clamp(product.marketPrice / item.price, 0.28, 1.65);
+    const priceFactor = clamp(Math.pow(product.marketPrice / item.price, priceSensitivity), 0.28, 1.8);
     const ratingFactor = clamp(state.rating / 4.5, 0.65, 1.15);
-    const competitionFactor = clamp(1.22 - product.competition * 0.055, 0.55, 1.05);
-    const adFactor = item.adActive ? 1.7 : 1;
+    const adFactor = item.adActive ? 1.7 * marketingBoost : 1;
     const noise = randomBetween(0.72, 1.28);
     const demandBase = product.demand * 1.45;
-    let sold = Math.round(demandBase * priceFactor * ratingFactor * competitionFactor * adFactor * noise);
+    let sold = Math.round(
+      demandBase *
+      productDemandMultiplier(product) *
+      priceFactor *
+      ratingFactor *
+      competitionFactor(product) *
+      adFactor *
+      noise
+    );
     sold = clamp(sold, 0, item.qty);
 
-    const returns = estimateReturns(sold, product.returnRate);
+    const returns = estimateReturns(sold, effectiveReturnRate(product));
     const netSold = sold - returns;
     const itemRevenue = sold * item.price;
     const itemRefunds = returns * item.price;
     const itemCommission = netSold * item.price * COMMISSION_RATE;
-    const itemLogistics = sold * DELIVERY_COST + returns * RETURN_LOGISTICS_COST;
-    const itemAds = item.adActive ? DAILY_AD_COST : 0;
+    const itemLogistics = sold * deliveryCost + returns * returnLogisticsCost;
+    const itemAds = item.adActive ? adCost : 0;
 
     item.qty -= sold;
     item.qty += returns;
@@ -495,7 +876,8 @@ function simulateDay() {
 
   if (soldTotal > 0) {
     const returnShare = returnsTotal / Math.max(soldTotal + returnsTotal, 1);
-    const ratingDelta = returnShare > 0.12 ? -0.05 : returnShare > 0.07 ? -0.02 : 0.01;
+    const serviceBonus = upgradeLevel("brand") * 0.003 + upgradeLevel("logistics") * 0.003;
+    const ratingDelta = (returnShare > 0.12 ? -0.05 : returnShare > 0.07 ? -0.02 : 0.01) + serviceBonus;
     state.rating = clamp(state.rating + ratingDelta, 1, 5);
   } else {
     state.rating = clamp(state.rating - 0.01, 1, 5);
@@ -510,14 +892,18 @@ function simulateDay() {
     commission,
     logistics,
     ads,
-    profit
+    profit,
+    event: marketEvent.title
   };
 
   state.day += 1;
+  const nextEvent = pickNextMarketEvent(marketEvent.id);
+  state.marketEventId = nextEvent.id;
   const summary = profit >= 0
     ? `День завершён: прибыль ${money(profit)}, продано ${soldTotal} шт.`
     : `День завершён с убытком ${money(Math.abs(profit))}. Проверьте цену и рекламу.`;
-  state.events = [summary, ...productEvents, ...state.events].slice(0, 20);
+  const tomorrowEvent = `Завтра: ${nextEvent.title}. ${nextEvent.text}`;
+  state.events = [summary, tomorrowEvent, ...productEvents, ...state.events].slice(0, 20);
 
   saveState();
   vibrate(profit >= 0 ? "medium" : "heavy");
