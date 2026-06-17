@@ -2,65 +2,91 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#6c5ce7" />
-  <title>Marketplace Empire — симулятор продавца</title>
-  <script src="https://telegram.org/js/telegram-web-app.js?62"></script>
-  <link rel="stylesheet" href="styles.css?v=20260616-v04" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+  <meta name="theme-color" content="#07101d" />
+  <meta name="color-scheme" content="dark" />
+  <title>Market Empire — стратегия маркетплейса</title>
+  <script async src="https://telegram.org/js/telegram-web-app.js?62"></script>
+  <link rel="stylesheet" href="styles.css?build=20260617-5" />
 </head>
 <body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+
   <div id="app" class="app-shell">
     <header class="topbar">
-      <div>
-        <div class="eyebrow">MARKETPLACE EMPIRE</div>
-        <h1 id="page-title">Карта города</h1>
+      <button id="brand-button" class="brand" type="button" aria-label="Открыть управление магазином">
+        <span id="brand-mark" class="brand-mark">ME</span>
+        <span class="brand-copy">
+          <strong id="brand-name">Market Empire</strong>
+          <small id="brand-subtitle">Локальный магазин</small>
+        </span>
+      </button>
+
+      <div class="topbar-actions">
+        <div class="resource-pill">
+          <span>День</span>
+          <strong id="header-day">1</strong>
+        </div>
+        <div class="resource-pill money-pill">
+          <span>Деньги</span>
+          <strong id="header-balance">0 ₽</strong>
+        </div>
       </div>
-      <div class="day-badge">День <span id="header-day">1</span></div>
     </header>
 
     <main id="view" class="view" aria-live="polite"></main>
 
-    <nav class="bottom-nav" aria-label="Навигация">
-      <button class="nav-item active" data-tab="home" type="button">
-        <span class="nav-icon">🗺️</span><span>Город</span>
+    <nav class="bottom-nav" aria-label="Навигация по игре">
+      <button class="nav-item active" data-tab="map" type="button">
+        <span class="nav-icon">🗺️</span><span>Карта</span>
       </button>
-      <button class="nav-item" data-tab="market" type="button">
-        <span class="nav-icon">🛒</span><span>Рынок</span>
-      </button>
-      <button class="nav-item" data-tab="stock" type="button">
+      <button class="nav-item" data-tab="products" type="button">
         <span class="nav-icon">📦</span><span>Товары</span>
       </button>
-      <button class="nav-item" data-tab="warehouse" type="button">
-        <span class="nav-icon">🏬</span><span>Склад</span>
-      </button>
       <button class="nav-item" data-tab="objects" type="button">
-        <span class="nav-icon">📍</span><span>ПВЗ</span>
+        <span class="nav-icon">🏬</span><span>Объекты</span>
       </button>
-      <button class="nav-item" data-tab="analytics" type="button">
-        <span class="nav-icon">📈</span><span>Аналитика</span>
+      <button class="nav-item" data-tab="finance" type="button">
+        <span class="nav-icon">📊</span><span>Финансы</span>
       </button>
-      <button class="nav-item" data-tab="development" type="button">
-        <span class="nav-icon">🧩</span><span>Развитие</span>
-      </button>
-      <button class="nav-item" data-tab="tasks" type="button">
-        <span class="nav-icon">🎯</span><span>Задания</span>
-      </button>
-      <button class="nav-item" data-tab="profile" type="button">
-        <span class="nav-icon">📊</span><span>Статистика</span>
+      <button id="next-day-nav" class="nav-item next-day-nav" type="button">
+        <span class="nav-icon">▶</span><span>День</span>
       </button>
     </nav>
   </div>
 
   <div id="modal-backdrop" class="modal-backdrop hidden" aria-hidden="true">
-    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <section class="modal" role="dialog" aria-modal="true" aria-label="Игровое окно">
       <button id="modal-close" class="modal-close" type="button" aria-label="Закрыть">×</button>
       <div id="modal-content"></div>
     </section>
   </div>
 
-  <div id="toast" class="toast" role="status"></div>
+  <section id="onboarding" class="onboarding hidden" aria-hidden="true">
+    <div class="onboarding-card">
+      <div class="onboarding-logo">ME</div>
+      <p class="eyebrow" style="margin-top:18px">MARKET EMPIRE</p>
+      <h1>Построй торговую империю</h1>
+      <p class="onboarding-lead">
+        Начни с маленького склада и одного ПВЗ. Развивай сеть, борись за районы города и вытесняй конкурентов.
+      </p>
 
-  <script src="city.js?v=20260616-v04"></script>
-  <script src="app.js?v=20260616-v04"></script>
+      <label class="field-label" for="shop-name">Название магазина</label>
+      <input id="shop-name" class="text-input" type="text" maxlength="24" value="MarketFox" autocomplete="off" />
+
+      <span class="field-label">Фирменный цвет</span>
+      <div id="color-picker" class="color-picker" aria-label="Выбор фирменного цвета"></div>
+
+      <button id="start-game" class="primary-btn full" type="button">Начать игру</button>
+      <button id="continue-old" class="secondary-btn full hidden" style="margin-top:9px" type="button">Перенести прогресс из старого MVP</button>
+      <p class="help-text" style="margin-top:14px">Прогресс сохраняется автоматически на этом устройстве.</p>
+    </div>
+  </section>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div class="build-badge" aria-label="Версия игры">v0.3.3 mobile map build</div>
+
+  <script src="app.js?build=20260617-5"></script>
 </body>
 </html>

@@ -32,15 +32,15 @@ async def start_handler(message: Message) -> None:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="🚀 Открыть Marketplace Empire",
+                    text="🗺 Открыть Market Empire",
                     web_app=WebAppInfo(url=WEB_APP_URL),
                 )
             ]
         ]
     )
     await message.answer(
-        "Добро пожаловать в Marketplace Empire!\n"
-        "Развивайте сеть ПВЗ, закупайте товары и захватывайте районы города.",
+        "Добро пожаловать в Market Empire!\n"
+        "Развивайте сеть ПВЗ, захватывайте районы и стройте торговую империю.",
         reply_markup=keyboard,
     )
 
