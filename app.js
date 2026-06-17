@@ -1,10 +1,10 @@
 "use strict";
 
-/* Market Empire v0.3.3 — mobile map build. No backend required. */
+/* Market Empire v0.3.6 — rapid day advance build. No backend required. */
 
 const STORAGE_KEY = "market_empire_v03";
 const OLD_STORAGE_KEY = "market_boss_mvp_v1";
-const SAVE_VERSION = 3;
+const SAVE_VERSION = 4;
 
 const CONFIG = {
   startBalance: 180000,
@@ -12,6 +12,13 @@ const CONFIG = {
   productLogistics: 92,
   returnLogistics: 75,
   pvzParcelFee: 48,
+  facilityRentDailyFactor: 0.15,
+  pvzStaffDailyCost: 220,
+  warehouseStaffDailyCost: 270,
+  pvzMaintenanceDaily: 60,
+  warehouseMaintenanceDaily: 120,
+  pvzLocalLogisticsDaily: 25,
+  rebalanceMinimumBalance: 60000,
   shareInertia: 0.16,
   captureShare: 50,
   captureDays: 3,
@@ -152,7 +159,10 @@ const ui = {
   mapMode: "city",
   selectedDistrictId: "south",
   toastTimer: null,
-  selectedColor: CONFIG.colors[0]
+  selectedColor: CONFIG.colors[0],
+  isAdvancingDay: false,
+  pendingDayTaps: 0,
+  dayBatchScheduled: false
 };
 
 const els = {
@@ -291,6 +301,10 @@ function migrateState(saved) {
     unlocks: { ...fresh.unlocks, ...(saved.unlocks || {}) }
   };
   for (const d of DISTRICTS) merged.districts[d.id] = { ...fresh.districts[d.id], ...(merged.districts[d.id] || {}) };
+  if ((Number(saved.version) || 0) < SAVE_VERSION && merged.balance < CONFIG.rebalanceMinimumBalance) {
+    merged.balance = CONFIG.rebalanceMinimumBalance;
+    merged.events.unshift("Экономика объектов перебалансирована. Магазину начислена разовая компенсация для продолжения игры.");
+  }
   return merged;
 }
 
@@ -426,7 +440,7 @@ function bootstrap() {
     if (ui.activeTab !== "map") ui.mapMode = "city";
     render();
   }));
-  document.getElementById("next-day-nav").addEventListener("click", openNextDayModal);
+  document.getElementById("next-day-nav").addEventListener("click", advanceDayOneTap);
   els.modalClose.addEventListener("click", closeModal);
   els.modalBackdrop.addEventListener("click", event => { if (event.target === els.modalBackdrop) closeModal(); });
   els.brandButton.addEventListener("click", openCompanyModal);
@@ -501,14 +515,14 @@ function buildCitySvg() {
   const districtShapes = DISTRICTS.map(d => {
     const runtime = state.districts[d.id];
     const leader = dominantOwner(runtime.shares);
-    const leaderColor = leader === "player" ? state.company.color : COMPETITORS[leader]?.color || "#64748b";
     const locked = !runtime.unlocked && runtime.status === "locked";
-    const opacity = locked ? .43 : .78;
+    const leaderColor = locked ? "#475569" : leader === "player" ? state.company.color : COMPETITORS[leader]?.color || "#64748b";
+    const opacity = locked ? .92 : .78;
     const selected = ui.selectedDistrictId === d.id ? "selected" : "";
     const outline = runtime.status === "contested" || runtime.status === "leader" ? "#f59e0b" : runtime.status === "controlled" || runtime.status === "dominant" ? state.company.color : "rgba(255,255,255,.16)";
     const playerShare = runtime.shares.player || 0;
     return `
-      <g data-district="${d.id}" tabindex="0" role="button" aria-label="${escapeHtml(d.name)}">
+      <g class="district-region ${locked ? "is-locked" : ""}" data-district="${d.id}" tabindex="0" role="button" aria-label="${escapeHtml(d.name)}">
         <polygon class="district-shape ${selected}" points="${d.polygon}" fill="${leaderColor}" fill-opacity="${opacity}" />
         <polygon class="district-outline" points="${d.polygon}" stroke="${outline}" stroke-width="${selected ? 6 : 3}" />
         <text class="district-label" x="${d.label[0]}" y="${d.label[1]}">${escapeHtml(d.name)}</text>
@@ -543,7 +557,6 @@ function buildCitySvg() {
 
 function mapMarker(x, y, text, color, id, radius = 15, owner = "player") {
   return `<g class="marker" data-facility="${id || ""}" transform="translate(${x} ${y})">
-    <circle class="marker-pulse" r="${radius + 10}" fill="${color}" />
     <circle class="marker-ring" r="${radius}" stroke="${color}" />
     <text class="marker-label" y="1">${text}</text>
   </g>`;
@@ -739,6 +752,16 @@ function facilityListCard(facility) {
   </button>`;
 }
 
+function estimateFacilityDailyCost(type, site, district, level = 1, staff = null) {
+  const isWarehouse = type === "warehouse";
+  const effectiveStaff = staff ?? (isWarehouse ? 2 : 1);
+  const rent = Math.round((site?.rent || 1000) * district.rent * CONFIG.facilityRentDailyFactor);
+  const salary = effectiveStaff * (isWarehouse ? CONFIG.warehouseStaffDailyCost : CONFIG.pvzStaffDailyCost);
+  const maintenance = Math.round((isWarehouse ? CONFIG.warehouseMaintenanceDaily : CONFIG.pvzMaintenanceDaily) * level);
+  const localLogistics = isWarehouse ? 0 : Math.round(CONFIG.pvzLocalLogisticsDaily * level);
+  return { rent, salary, maintenance, localLogistics, total: rent + salary + maintenance + localLogistics };
+}
+
 function openSiteModal(districtId, siteId) {
   const district = districtById(districtId);
   const runtime = state.districts[districtId];
@@ -749,14 +772,14 @@ function openSiteModal(districtId, siteId) {
   const accessible = runtime.unlocked || runtime.status !== "locked";
   const base = site.kind === "warehouse" ? 420000 : 78000;
   const cost = Math.round(base * district.rent * (0.75 + site.traffic * 0.35));
-  const dailyRent = Math.round(site.rent * district.rent);
+  const dailyCost = estimateFacilityDailyCost(site.kind, site, district);
   showModal(`
     <p class="eyebrow">СВОБОДНЫЙ ОБЪЕКТ</p>
     <h2>${escapeHtml(site.label)}</h2>
     <p class="modal-lead">${site.kind === "warehouse" ? "Площадка под склад" : "Помещение под новый пункт выдачи"} в районе «${escapeHtml(district.name)}».</p>
     <div class="metric-grid">
       <div class="metric-card"><span>Открытие</span><strong>${money(cost)}</strong></div>
-      <div class="metric-card"><span>Расход/день</span><strong>${money(dailyRent)}</strong></div>
+      <div class="metric-card"><span>Расход/день</span><strong>${money(dailyCost.total)}</strong><small>аренда, персонал и обслуживание</small></div>
       <div class="metric-card"><span>Трафик</span><strong>${site.traffic >= 1.15 ? "Высокий" : site.traffic < .85 ? "Низкий" : "Средний"}</strong></div>
       <div class="metric-card"><span>Влияние</span><strong>+${Math.round(28 * site.traffic)}</strong></div>
     </div>
@@ -1083,6 +1106,43 @@ function openCompanyModal() {
   });
 }
 
+function advanceDayOneTap() {
+  if (!state) return;
+
+  // Every tap is preserved as one full game day. Several rapid taps are
+  // grouped into a short animation-frame batch so mobile browsers do not lag.
+  ui.pendingDayTaps += 1;
+  if (ui.dayBatchScheduled) return;
+
+  ui.dayBatchScheduled = true;
+  requestAnimationFrame(processQueuedDays);
+}
+
+function processQueuedDays() {
+  ui.dayBatchScheduled = false;
+  if (!state || ui.pendingDayTaps <= 0) return;
+
+  // Limit work per frame, but never discard taps.
+  const batchSize = Math.min(ui.pendingDayTaps, 12);
+  ui.pendingDayTaps -= batchSize;
+
+  let lastReport = null;
+  for (let i = 0; i < batchSize; i += 1) {
+    lastReport = simulateDay({ saveAfter: false, renderAfter: false, showReport: false, hapticAfter: false });
+  }
+
+  saveState();
+  render();
+  if (lastReport) {
+    notify(`День ${lastReport.day}: ${lastReport.orders} продаж · ${money(lastReport.profit)}`);
+  }
+
+  if (ui.pendingDayTaps > 0) {
+    ui.dayBatchScheduled = true;
+    requestAnimationFrame(processQueuedDays);
+  }
+}
+
 function openNextDayModal() {
   if (!state) return;
   const shipmentsTomorrow = state.shipments.filter(s => s.arrivalDay <= state.day + 1).length;
@@ -1100,7 +1160,8 @@ function openNextDayModal() {
   `, () => document.getElementById("confirm-next-day")?.addEventListener("click", simulateDay));
 }
 
-function simulateDay() {
+function simulateDay(options = {}) {
+  const { saveAfter = true, renderAfter = true, showReport = true, hapticAfter = true } = options;
   closeModal();
   const report = {
     day: state.day,
@@ -1136,10 +1197,11 @@ function simulateDay() {
   state.company.totalValue = companyValue();
   state.events.unshift(`День ${report.day}: ${report.orders} продаж, ${report.parcels} выдач, результат ${money(report.profit)}.`);
   state.events = state.events.slice(0, 30);
-  saveState();
-  vibrate(report.profit >= 0 ? "medium" : "heavy");
-  render();
-  openReportModal(report);
+  if (saveAfter) saveState();
+  if (hapticAfter) vibrate(report.profit >= 0 ? "medium" : "heavy");
+  if (renderAfter) render();
+  if (showReport) openReportModal(report);
+  return report;
 }
 
 function processArrivingShipments(report) {
@@ -1301,18 +1363,21 @@ function processPvzOperations(report) {
 }
 
 function applyDailyCosts(report) {
-  let logistics=0;
-  for(const f of playerFacilities()){
-    const district=districtById(f.districtId); const site=siteById(f.districtId,f.siteId);
-    const rent=Math.round((site?.rent||1000)*district.rent);
-    const salary=f.staff*(f.type==="warehouse"?1250:1100);
-    const maintenance=Math.round((f.type==="warehouse"?650:280)*f.level);
-    report.facilityCosts+=rent+salary+maintenance;
-    if(f.type==="pvz") logistics+=Math.round(120*f.level*(1+f.queue/25));
+  let logistics = 0;
+  for (const f of playerFacilities()) {
+    const district = districtById(f.districtId);
+    const site = siteById(f.districtId, f.siteId);
+    const costs = estimateFacilityDailyCost(f.type, site, district, f.level, f.staff);
+    report.facilityCosts += costs.rent + costs.salary + costs.maintenance;
+    if (f.type === "pvz") {
+      logistics += Math.round(costs.localLogistics * (1 + f.queue / 40));
+    }
   }
-  if(isIndustrialControlled()) logistics*=.88;
-  report.facilityCosts+=Math.round(logistics);
-  for(const district of DISTRICTS){if(state.districts[district.id].adDays>0) report.adCosts+=CONFIG.localAdCost/CONFIG.localAdDays;}
+  if (isIndustrialControlled()) logistics *= .88;
+  report.facilityCosts += Math.round(logistics);
+  for (const district of DISTRICTS) {
+    if (state.districts[district.id].adDays > 0) report.adCosts += CONFIG.localAdCost / CONFIG.localAdDays;
+  }
 }
 
 function updateDistrictStatuses(report) {

@@ -97,18 +97,29 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .road-core { fill: none; stroke: rgba(222,235,246,.12); stroke-width: 2; stroke-dasharray: 8 10; }
 .block { fill: #182a3f; stroke: #223851; stroke-width: 1.4; }
 .block-light { fill: #1b3048; }
-.district-shape { cursor: pointer; transition: filter .18s ease, opacity .18s ease, transform .18s ease; transform-box: fill-box; transform-origin: center; }
-.district-shape:hover, .district-shape:focus { filter: brightness(1.18); }
-.district-shape.selected { filter: brightness(1.18) drop-shadow(0 0 9px rgba(255,255,255,.18)); }
+.district-shape { cursor: pointer; transition: opacity .14s ease; transform-box: fill-box; transform-origin: center; }
+.district-shape.selected { opacity: 1; }
+.district-region.is-locked .district-label { fill: #d1d5db; }
+.district-region.is-locked .district-share { fill: #aab4c2; }
 .district-outline { pointer-events: none; fill: none; stroke: rgba(255,255,255,.16); stroke-width: 3; }
 .district-label { pointer-events: none; fill: #fff; font-size: 18px; font-weight: 900; text-anchor: middle; paint-order: stroke; stroke: rgba(4,10,17,.78); stroke-width: 5px; }
 .district-share { pointer-events: none; fill: #dce8f5; font-size: 12px; font-weight: 800; text-anchor: middle; paint-order: stroke; stroke: rgba(4,10,17,.9); stroke-width: 4px; }
-.marker { cursor: pointer; filter: drop-shadow(0 4px 7px rgba(0,0,0,.45)); transition: transform .15s ease; transform-box: fill-box; transform-origin: center; }
-.marker:hover { transform: scale(1.1); }
+.marker { cursor: pointer; transform-box: fill-box; transform-origin: center; }
 .marker-ring { fill: #09111f; stroke-width: 4; }
 .marker-label { pointer-events: none; font-size: 11px; font-weight: 950; text-anchor: middle; dominant-baseline: middle; fill: white; }
-.marker-pulse { animation: mapPulse 2s infinite; }
-@keyframes mapPulse { 0%,100%{opacity:.28;transform:scale(.8)} 50%{opacity:.07;transform:scale(1.35)} }
+.marker-pulse { opacity: .14; }
+
+
+@media (hover: hover) and (pointer: fine) {
+  .district-region:not(.is-locked):hover .district-shape,
+  .district-region:not(.is-locked):focus .district-shape { opacity: .92; }
+  .marker:hover .marker-ring,
+  .marker:focus .marker-ring { stroke-width: 5; }
+}
+
+@media (hover: none), (pointer: coarse), (prefers-reduced-motion: reduce) {
+  .district-shape, .marker, .marker-pulse { transition: none !important; animation: none !important; }
+}
 
 .district-summary { display: grid; gap: 12px; }
 .district-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
@@ -410,4 +421,15 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
   .map-viewport .district-map { width: 100%; height: auto; }
   .district-label { font-size: 18px; }
   .district-share { font-size: 12px; }
+}
+
+/* v0.3.6: the day button is intentionally optimized for rapid repeated taps. */
+#next-day-nav {
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#next-day-nav:active {
+  transform: scale(0.96);
 }
